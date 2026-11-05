@@ -1,0 +1,393 @@
+// TruTicket Database Schema (Supabase PostgreSQL)
+// 19 Tables — Production Ready
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ATTENDEE
+  ORGANIZER
+  GATE_STAFF
+  FRAUD_REVIEWER
+  PLATFORM_ADMIN
+}
+
+enum TicketStatus {
+  CREATED
+  AVAILABLE
+  ISSUED_ACTIVE
+  ISSUED_UNASSIGNED_GROUP
+  LISTED
+  TRANSFERRED
+  REDEEMED
+  REVOKED
+  CANCELLED
+  REFUNDED
+}
+
+enum OrderStatus {
+  CREATED
+  RESERVED
+  PAYMENT_PENDING
+  PAID
+  TICKET_ISSUED
+  PAYMENT_FAILED
+  RESERVATION_EXPIRED
+  CANCELLED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum ResaleListingStatus {
+  DRAFT
+  ACTIVE
+  PURCHASE_PENDING
+  TRANSFER_PENDING
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  PAYMENT_FAILED
+  TRANSFER_FAILED
+  DISPUTED
+}
+
+enum QueueAllocationStatus {
+  JOINED
+  SELECTED
+  ADMITTED
+  EXPIRED
+  CANCELLED
+}
+
+enum RiskBand {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Profile {
+  id            String   @id @default(cuid()) @db.Uuid
+  email         String   @unique
+  phone         String?
+  passwordHash  String?
+  role          UserRole @default(ATTENDEE)
+  status        String   @default("active") // active, suspended, banned
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organizer     Organizer?
+  tickets       Ticket[]
+  orders        Order[]
+  resaleListings ResaleListing[]
+  transfers     Transfer[]
+  redemptions   Redemption[]
+  fraudEvents   FraudEvent[]
+
+  @@map("profiles")
+}
+
+model Organizer {
+  id                String   @id @default(cuid()) @db.Uuid
+  userId            String   @unique @db.Uuid
+  organizationName  String
+  verificationStatus String @default("pending") // pending, verified, rejected
+  createdAt         DateTime @default(now())
+
+  user              Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events            Event[]
+
+  @@map("organizers")
+}
+
+model Event {
+  id                String      @id @default(cuid()) @db.Uuid
+  organizerId       String      @db.Uuid
+  title             String
+  description       String?
+  venue             String
+  timezone          String      @default("Asia/Kolkata")
+  startAt           DateTime
+  endAt             DateTime
+  coverImageUrl     String?
+  categories        String[]
+  terms             String?
+  status            String      @default("draft") // draft, published, cancelled, completed
+  contractAddress   String?
+  chainId           Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organizer         Organizer   @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  ticketTypes       TicketType[]
+  tickets           Ticket[]
+  orders            Order[]
+  queueEntries      QueueEntry[]
+  resaleListings    ResaleListing[]
+  redemptions       Redemption[]
+  scanners          Scanner[]
+
+  @@map("events")
+}
+
+model TicketType {
+  id              String   @id @default(cuid()) @db.Uuid
+  eventId         String   @db.Uuid
+  name            String   // General, VIP, Student
+  faceValueMinor  Int      // in paise
+  currency        String   @default("INR")
+  quantity        Int
+  saleStart       DateTime
+  saleEnd         DateTime
+  perAccountLimit Int      @default(4)
+  refundRules     String?
+  createdAt       DateTime @default(now())
+
+  event           Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tickets         Ticket[]
+  orderItems      OrderItem[]
+
+  @@map("ticket_types")
+}
+
+model Ticket {
+  id              String        @id @default(cuid()) @db.Uuid
+  eventId         String        @db.Uuid
+  ticketTypeId    String        @db.Uuid
+  tokenId         String?       // blockchain token ID
+  currentOwnerId  String        @db.Uuid
+  faceValueMinor  Int           // immutable face value in paise
+  status          TicketStatus  @default(CREATED)
+  transferCount   Int           @default(0)
+  policyVersion   Int           @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  event           Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketType      TicketType    @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+  currentOwner    Profile       @relation(fields: [currentOwnerId], references: [id], onDelete: Cascade)
+  orderItems      OrderItem[]
+  resaleListings  ResaleListing[]
+  transfersFrom   Transfer[]    @relation("TicketTransfersFrom")
+  transfersTo     Transfer[]    @relation("TicketTransfersTo")
+  qrCredentials   QrCredential[]
+  redemptions     Redemption[]
+
+  @@map("tickets")
+}
+
+model Order {
+  id              String       @id @default(cuid()) @db.Uuid
+  buyerId         String       @db.Uuid
+  eventId         String       @db.Uuid
+  status          OrderStatus  @default(CREATED)
+  totalMinor      Int          // in paise
+  currency        String       @default("INR")
+  idempotencyKey  String       @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  buyer           Profile      @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  event           Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orderItems      OrderItem[]
+  payments        Payment[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String   @id @default(cuid()) @db.Uuid
+  orderId        String   @db.Uuid
+  ticketTypeId   String   @db.Uuid
+  ticketId       String   @db.Uuid
+  unitPriceMinor Int      // in paise
+
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketType     TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+  ticket         Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("order_items")
+}
+
+model Payment {
+  id                String   @id @default(cuid()) @db.Uuid
+  orderId           String   @db.Uuid
+  provider          String   @default("razorpay")
+  providerPaymentId String?
+  status            String   @default("pending") // pending, succeeded, failed
+  signatureVerified Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model InventoryReservation {
+  id           String   @id @default(cuid()) @db.Uuid
+  eventId      String   @db.Uuid
+  ticketTypeId String   @db.Uuid
+  userId       String   @db.Uuid
+  quantity     Int
+  expiresAt    DateTime
+  status       String   @default("active") // active, expired, consumed
+
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+  user         Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_reservations")
+}
+
+model QueueEntry {
+  id                  String              @id @default(cuid()) @db.Uuid
+  eventId             String            @db.Uuid
+  userId              String?           @db.Uuid
+  sessionId           String?           // for anonymous users
+  joinedAt            DateTime          @default(now())
+  allocationStatus    QueueAllocationStatus @default(JOINED)
+  admissionExpiresAt  DateTime?
+  createdAt           DateTime @default(now())
+
+  event               Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user                Profile? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("queue_entries")
+}
+
+model ResaleListing {
+  id              String               @id @default(cuid()) @db.Uuid
+  ticketId        String               @db.Uuid
+  sellerId        String               @db.Uuid
+  askMinor        Int                  // in paise
+  status          ResaleListingStatus  @default(DRAFT)
+  expiresAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  seller          Profile  @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@map("resale_listings")
+}
+
+model Transfer {
+  id              String   @id @default(cuid()) @db.Uuid
+  ticketId        String   @db.Uuid
+  fromOwnerId     String   @db.Uuid
+  toOwnerId       String   @db.Uuid
+  priceMinor      Int      // 0 for group transfers, >0 for resale
+  txHash          String?  // blockchain tx hash
+  status          String   @default("pending") // pending, completed, failed
+  createdAt       DateTime @default(now())
+
+  ticket          Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fromOwner       Profile     @relation("TicketTransfersFrom", fields: [fromOwnerId], references: [id], onDelete: Cascade)
+  toOwner         Profile     @relation("TicketTransfersTo", fields: [toOwnerId], references: [id], onDelete: Cascade)
+
+  @@map("transfers")
+}
+
+model QrCredential {
+  id          String   @id @default(cuid()) @db.Uuid
+  ticketId    String   @db.Uuid
+  nonceHash   String   // hashed nonce, never raw secret
+  expiresAt   DateTime
+  keyId       String   // signing key ID for rotation
+  consumedAt  DateTime?
+  status      String   @default("active") // active, consumed, expired
+  createdAt   DateTime @default(now())
+
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("qr_credentials")
+}
+
+model Redemption {
+  id            String   @id @default(cuid()) @db.Uuid
+  ticketId      String   @db.Uuid
+  eventId       String   @db.Uuid
+  scannerId     String   @db.Uuid
+  redeemedAt    DateTime @default(now())
+  result        String   // VALID, ALREADY_USED, EXPIRED, INVALID, REVOKED, WRONG_EVENT, NETWORK_ERROR
+  idempotencyKey String  @unique
+
+  ticket        Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  scanner       Scanner  @relation(fields: [scannerId], references: [id], onDelete: Cascade)
+
+  @@map("redemptions")
+}
+
+model Scanner {
+  id              String   @id @default(cuid()) @db.Uuid
+  eventId         String   @db.Uuid
+  deviceName      String
+  publicKey       String?  // device public key for QR verification
+  deviceSecretRef String?  // reference to secret in vault
+  status          String   @default("active") // active, revoked
+  createdAt       DateTime @default(now())
+
+  event           Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  redemptions     Redemption[]
+
+  @@map("scanners")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String   // create_event, mint_ticket, resale_list, redeem_ticket, etc.
+  objectType String   // ticket, order, event, listing, etc.
+  objectId   String?
+  outcome    String   // success, failure, blocked
+  timestamp  DateTime @default(now())
+
+  actor      Profile? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model FraudEvent {
+  id           String   @id @default(cuid()) @db.Uuid
+  sessionId    String   @unique
+  userId       String?  @db.Uuid
+  riskScore    Int      // 0-100
+  riskBand     RiskBand @default(LOW)
+  reasonCodes  String[] // RAPID_CHECKOUT_CADENCE, IP_BURST_RATE_EXCEEDED, etc.
+  status       String   @default("open") // open, reviewed, dismissed, appealed
+  reviewedBy   String?  @db.Uuid
+  reviewedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  user         Profile?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reviewer     Profile?   @relation(fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@map("fraud_events")
+}
+
+model GroupTicket {
+  id           String   @id @default(cuid()) @db.Uuid
+  orderId      String   @db.Uuid
+  managerId    String   @db.Uuid // the group manager who bought bulk
+  memberId     String?  @db.Uuid // assigned member (null if unassigned)
+  ticketId     String   @db.Uuid
+  status       String   @default("unassigned") // unassigned, invite_sent, claim_pending, allocated
+  claimToken   String?  // secure token for member to claim
+  inviteExpiresAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  order        Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  manager      Profile   @relation(fields: [managerId], references: [id], onDelete: Cascade)
+  member       Profile?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  ticket       Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("group_tickets")
+}

@@ -1,0 +1,30 @@
+{
+  "name": "truticket",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TruTicket — Fair access. Genuine tickets. Controlled resale.",
+  "workspaces": [
+    "apps/mobile",
+    "apps/web",
+    "services/api"
+  ],
+  "scripts": {
+    "dev:web": "cd apps/web && npm run dev",
+    "dev:mobile": "cd apps/mobile && npx expo start",
+    "dev:ml": "cd services/ml && uvicorn main:app --reload",
+    "db:push": "npx prisma db push",
+    "db:generate": "npx prisma generate",
+    "contracts:compile": "cd contracts && npx hardhat compile",
+    "contracts:test": "cd contracts && npx hardhat test",
+    "lint": "echo \"Linting all workspaces...\"",
+    "setup": "echo \"Run: cp .env.example .env && fill in values\""
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "prettier": "^3.1.0",
+    "eslint": "^8.55.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

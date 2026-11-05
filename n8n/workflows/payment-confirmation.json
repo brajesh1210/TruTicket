@@ -1,0 +1,32 @@
+{
+  "name": "TruTicket — Payment Confirmation",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "razorpay-webhook", "responseMode": "onReceived" },
+      "name": "Razorpay Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": { "operation": "update", "table": "payments", "filter": { "provider_payment_id": "={{ $json.payload.entity.payment.id }}" } },
+      "name": "Update Payment Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": { "operation": "create", "table": "audit_logs" },
+      "name": "Log Audit Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Razorpay Webhook": { "main": [[{ "node": "Update Payment Status", "type": "main", "index": 0 }]] },
+    "Update Payment Status": { "main": [[{ "node": "Log Audit Event", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "id": "payment-confirmation-workflow"
+}

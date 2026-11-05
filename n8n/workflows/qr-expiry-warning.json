@@ -1,0 +1,32 @@
+{
+  "name": "TruTicket — QR Expiry Warning",
+  "nodes": [
+    {
+      "parameters": { "interval": 300, "triggerTimes": [] },
+      "name": "Cron — Every 5 min",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [240, 200]
+    },
+    {
+      "parameters": { "operation": "select", "table": "qr_credentials", "filter": { "status": "active", "expires_at": "< now + 300 seconds" } },
+      "name": "Find Expiring QRs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [460, 200]
+    },
+    {
+      "parameters": { "operation": "send", "channel": "push" },
+      "name": "Send Push Notification",
+      "type": "n8n-nodes-base.notification",
+      "typeVersion": 1,
+      "position": [680, 200]
+    }
+  ],
+  "connections": {
+    "Cron — Every 5 min": { "main": [[{ "node": "Find Expiring QRs", "type": "main", "index": 0 }]] },
+    "Find Expiring QRs": { "main": [[{ "node": "Send Push Notification", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "id": "qr-expiry-workflow"
+}

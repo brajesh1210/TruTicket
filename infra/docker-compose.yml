@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+  # Supabase is managed — use hosted Supabase for free tier
+  # Local development only if self-hosting
+
+  ml-service:
+    build:
+      context: ./services/ml
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ML_MODEL_PATH=./model/risk_model.pkl
+    volumes:
+      - ./services/ml:/app
+
+  n8n:
+    image: n8nio/n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=changeme
+    volumes:
+      - ./n8n:/home/node/.n8n
+
+volumes:
+  n8n_data:
