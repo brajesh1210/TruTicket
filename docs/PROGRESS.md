@@ -8,25 +8,30 @@ Spec: `TruTicket Master Unified PRD v2.0` (authoritative). Priority: **Mobile fi
 
 ---
 
-## v3 Status (Plan v3, free-first auth) — 2026-11-04
+## v3 Status (Plan v3, free-first auth) — updated 2026-11-09
 
-Done in this batch:
-- [x] Phase 0: brand assets generated from the official logo (`assets/brand/`, generator `tools/brand_assets.py`)
-- [x] Phase 0: design tokens (`packages/ui-tokens/tokens.json` + `index.ts`)
-- [x] Phase 1 setup: Expo SDK 57 app (`apps/mobile`), app.json renamed to TruTicket, icons and splash from the logo
-- [x] Phase 1 setup: metro config for monorepo tokens import, `npm install`, `tsc --noEmit` clean, `expo export --platform android` bundles OK
+Done:
+- [x] Phase 0: brand assets from the official logo (`assets/brand/`, `tools/brand_assets.py`)
+- [x] Phase 0: design tokens (`packages/ui-tokens/`)
+- [x] Phase 1 setup: Expo SDK 57 app (`apps/mobile`), icons and splash from the logo, typecheck and bundle OK
 - [x] Shared components: Button, Field, OtpInput, Logo, Screen, EventCard
-- [x] Auth core (mock, DEMO_MODE gated): normalised email duplicate key, resend cooldown, 5 wrong codes = 15 min lock
-- [x] Auth self-test: `apps/mobile/scripts/auth-selftest.sh` (passes)
-- [x] Screens: index redirect, onboarding (3 slides), login, login/email, login/otp, verify-gate, tabs layout, Home (explore), Profile (logout)
-- [~] Screens: Categories and My Tickets are placeholders only
-- [ ] Event detail, queue, seat/tier select, checkout (mock), success, ticket QR, new-device screen, organiser and gate screens (rest of the 22 mobile screens)
-- [ ] Phase 1 done-when: full mock flow works on Expo Go (Android)
-- [ ] Google One-Tap real login (needs Google OAuth client IDs: Android, iOS, Web)
-- [ ] Email OTP real backend (Phase 2, Supabase Auth)
-- [ ] Web (Phase 4) not started. Backend migrations 002/003/004 not started.
+- [x] Auth core: normalised email duplicate key, resend cooldown, 5 wrong codes = 15 min lock, auth self-test passes
+- [x] Real Google sign-in (native, `@react-native-google-signin`), tested on Android dev build: login and home work
+- [x] Dev build: EAS `development` profile, APK installed on test phone
+- [x] Screens: onboarding, login, login/email, login/otp, verify-gate, home (explore), event detail, fair queue, checkout (mock), success, ticket with QR, my tickets, profile
+- [~] Categories tab: placeholder only
+- [ ] Remaining PRD mobile screens from PLAN §4: resale listing, group tickets, new-device, gate scanner, organiser screens
+- [ ] Phase 1 done-when: full mock flow works (it does for purchase; resale, group and gate screens pending)
 
-Decisions still needed from the user (see chat): organiser 2FA default, Google OAuth client IDs, Anany's scope (ML only or ML + Security).
+Decisions accepted:
+- Organiser verification default (D-O1): verified email + TOTP 2FA (free). GST and PAN before real payouts.
+- Anany's scope: ML only. Security review owner not assigned yet.
+
+Not started:
+- Web (Phase 4). Backend migrations 002/003/004 (Phase 2). Real email OTP (Phase 2). Razorpay (Phase 5).
+- iOS Google client and Apple Sign-In (Launch).
+
+Remaining work to verify on the device: real Google login on the test phone. Done.
 
 ---
 

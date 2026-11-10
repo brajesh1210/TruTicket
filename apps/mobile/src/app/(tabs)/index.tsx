@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { router } from "expo-router";
 import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Screen } from "../../components/Screen";
 import { EventCard } from "../../components/EventCard";
@@ -63,7 +64,7 @@ export default function Explore() {
             <SectionHeader title="This Week's Highlights" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
               {highlights.map((e) => (
-                <EventCard key={e.id} event={e} variant="wide" />
+                <EventCard key={e.id} event={e} variant="wide" onPress={() => router.push(`/event/${e.id}`)} />
               ))}
             </ScrollView>
           </>
@@ -74,7 +75,7 @@ export default function Explore() {
             <SectionHeader title="Trending Events" />
             <View style={styles.grid}>
               {trending.map((e) => (
-                <EventCard key={e.id} event={e} />
+                <EventCard key={e.id} event={e} onPress={() => router.push(`/event/${e.id}`)} />
               ))}
             </View>
           </>
