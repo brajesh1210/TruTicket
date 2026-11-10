@@ -1,7 +1,7 @@
 /**
  * Mock tickets for Phase 1 (UI only).
- * In Phase 2 these come from the `tickets` table, and the QR payload comes from the
- * rotating nonce (dynamic QR, refreshed about every 30 seconds).
+ * In Phase 2 these come from the `tickets` table. The real gate QR is a server-signed
+ * credential that rotates every 10 seconds (PRD section 6.4).
  */
 export type MockTicket = {
   id: string;
@@ -50,4 +50,20 @@ export const MOCK_TICKETS: MockTicket[] = [
 export function getTicket(id: string | string[] | undefined): MockTicket | undefined {
   const key = Array.isArray(id) ? id[0] : id;
   return MOCK_TICKETS.find((t) => t.id === key);
+}
+
+/** Mock state change. Phase 2 calls the backend listForResale() instead. */
+export function listTicket(id: string): boolean {
+  const t = MOCK_TICKETS.find((x) => x.id === id);
+  if (!t || t.status !== "upcoming") return false;
+  t.status = "listed";
+  return true;
+}
+
+/** Mock state change. Phase 2 calls the backend cancel-listing endpoint instead. */
+export function cancelListing(id: string): boolean {
+  const t = MOCK_TICKETS.find((x) => x.id === id);
+  if (!t || t.status !== "listed") return false;
+  t.status = "upcoming";
+  return true;
 }

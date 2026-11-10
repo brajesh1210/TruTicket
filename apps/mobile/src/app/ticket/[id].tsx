@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { QrView } from "../../components/QrView";
+import { Button } from "../../components/Button";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Screen } from "../../components/Screen";
 import { getEvent } from "../../mock/events";
-import { getTicket } from "../../mock/tickets";
+import { cancelListing, getTicket, listTicket } from "../../mock/tickets";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
-const REFRESH_SECONDS = 30;
+// PRD section 6.4: the gate credential rotates every 10 seconds.
+const REFRESH_SECONDS = 10;
 
 /**
  * Ticket with a demo QR. The payload is NOT secure yet: it is built on the device from
- * the ticket id and the 30-second window, so anyone can reproduce it. The real gate QR
+ * the ticket id and the 10-second window, so anyone can reproduce it. The real gate QR
  * is a server-signed token with a nonce, verified by the scanner (Phase 2/3).
+ * Ticket DNA (PRD 6.3) is shown with mock values until the backend exists.
  */
 export default function TicketScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,13 +37,14 @@ export default function TicketScreen() {
     );
   }
 
-  // Wall-clock aligned: the QR and the countdown both use the same 30-second window.
+  // Wall-clock aligned: the QR and the countdown both use the same 10-second window.
   // `tick` only forces a re-render every second.
   void tick;
   const nowSec = Math.floor(Date.now() / 1000);
   const windowIndex = Math.floor(nowSec / REFRESH_SECONDS);
   const secondsLeft = REFRESH_SECONDS - (nowSec % REFRESH_SECONDS);
   const payload = `TT|${ticket.id}|${windowIndex}`;
+  const faceValue = event.tiers.find((t) => t.name === ticket.tierName)?.price ?? event.fromPrice;
   const isListed = ticket.status === "listed";
 
   return (
@@ -74,6 +78,13 @@ export default function TicketScreen() {
           ) : null}
         </View>
 
+        <Text style={styles.dnaTitle}>Ticket DNA</Text>
+        <View style={styles.details}>
+          <Detail label="Token ID" value={`TT-DNA-${ticket.id.replace("tkt-", "")}`} />
+          <Detail label="Original issue price" value={`₹${faceValue.toLocaleString("en-IN")}`} />
+          <Detail label="Authenticity" value={ticket.status === "past" ? "Issued · used" : "Issued by TruTicket"} />
+        </View>
+
         <View style={styles.details}>
           <Detail label="Ticket" value={ticket.tierName} />
           <Detail label="Quantity" value={String(ticket.quantity)} />
@@ -81,6 +92,24 @@ export default function TicketScreen() {
           <Detail label="Holder" value={ticket.holder} />
           <Detail label="Status" value={ticket.status} />
         </View>
+        {ticket.status === "upcoming" ? (
+          <Button
+            label="List for resale"
+            variant="secondary"
+            onPress={() => router.push({ pathname: "/resale/sell/[id]", params: { id: ticket.id } })}
+            testID="list-for-resale"
+          />
+        ) : null}
+        {ticket.status === "listed" ? (
+          <Button
+            label="Cancel listing"
+            variant="ghost"
+            onPress={() => {
+              cancelListing(ticket.id);
+            }}
+            testID="cancel-listing"
+          />
+        ) : null}
       </ScrollView>
     </Screen>
   );
@@ -136,5 +165,6 @@ const styles = StyleSheet.create({
   },
   rowLabel: { color: colors.text.muted, fontSize: fontSize.md },
   rowValue: { color: colors.text.primary, fontSize: fontSize.md, fontWeight: fontWeight.semibold, maxWidth: "60%", textAlign: "right" },
+  dnaTitle: { color: colors.text.primary, fontSize: fontSize.lg, fontWeight: fontWeight.semibold, marginTop: space.xs },
   missing: { color: colors.text.primary, fontSize: fontSize.lg, marginTop: space.xl, textAlign: "center" },
 });

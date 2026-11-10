@@ -106,11 +106,13 @@ Order: **mobile first, then web.** Backend and blockchain run in parallel once t
 - Deliverable: `docs/DESIGN_SYSTEM.md` and `/styleguide` page on web.
 - Done when: style guide renders every component in dark theme.
 
-### Phase 1 — Mobile UI with mock data (L) — IN PROGRESS (batch 1 of 3: auth, onboarding, home, profile)
+### Phase 1 — Mobile UI with mock data (L) — MOBILE SCREENS BUILT (batch 3 done; on-device test pending; web not started)
 - Expo app (current SDK, TypeScript, Expo Router). Replace starter screens in `apps/mobile/`.
 - Build 22 mobile screens with mock data (Coldplay, Arijit Singh, Taylor Swift, Billie Eilish from references).
 - Navigation: 4-tab bottom bar (Home, Categories, Tickets, Profile). Gate staff get a separate scanner stack.
 - Mock layer behind `services/`, so real APIs replace it without screen changes.
+- Batch 3 (built): Categories, Resale marketplace, Sell-a-ticket (price cap, PRD 6.5), Group distribution manager (FR-027), New-device verification (demo), Security & devices, Gate scanner (camera view, scan result, activity log, manual lookup). Ticket DNA section added to ticket detail. Gate QR window set to 10 s per PRD 6.4.
+- Mock limits (replaced in Phase 2): gate scanning uses sample buttons until expo-camera is in a new EAS dev build; redeemed set is in memory; resale and group state reset on app reload.
 - Done when: all 22 screens are reachable on Expo Go (Android). Flow works: onboarding → login → email OTP → explore → event → queue → select → checkout (mock) → success → my tickets → QR.
 
 ### Phase 2 — Backend core: Free auth, sessions, ticketing (L)

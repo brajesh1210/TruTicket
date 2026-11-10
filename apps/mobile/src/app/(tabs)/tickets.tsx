@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useReducer, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { Screen } from "../../components/Screen";
 import { getEvent } from "../../mock/events";
 import { MOCK_TICKETS, MockTicket } from "../../mock/tickets";
@@ -15,18 +15,38 @@ const STATUS_FOR_TAB: Record<TabName, MockTicket["status"]> = {
   Listed: "listed",
 };
 
-/** My Tickets (mock). Real data comes from the tickets table in Phase 2. */
+/**
+ * My Tickets (mock). Real data comes from the tickets table in Phase 2.
+ * Re-reads on focus, so a ticket listed on the sell screen moves to the Listed tab.
+ */
 export default function Tickets() {
   const [tab, setTab] = useState<TabName>("Upcoming");
+  const [, refresh] = useReducer((n: number) => n + 1, 0);
 
-  const list = useMemo(
-    () => MOCK_TICKETS.filter((t) => t.status === STATUS_FOR_TAB[tab]),
-    [tab],
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, []),
   );
+
+  const list = MOCK_TICKETS.filter((t) => t.status === STATUS_FOR_TAB[tab]);
 
   return (
     <Screen edges={["top"]}>
       <Text style={styles.title}>My Tickets</Text>
+
+      <View style={styles.links}>
+        <Pressable onPress={() => router.push("/resale")} style={styles.link} accessibilityRole="button">
+          <Text style={styles.linkText}>Resale market →</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push({ pathname: "/group/[id]", params: { id: "grp-1" } })}
+          style={styles.link}
+          accessibilityRole="button"
+        >
+          <Text style={styles.linkText}>Group tickets →</Text>
+        </Pressable>
+      </View>
 
       <View style={styles.tabs}>
         {TABS.map((t) => (
@@ -72,6 +92,9 @@ export default function Tickets() {
 
 const styles = StyleSheet.create({
   title: { color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.bold, marginTop: space.md },
+  links: { flexDirection: "row", gap: space.md, marginTop: space.sm },
+  link: { paddingVertical: space.xxs },
+  linkText: { color: colors.brand.cyan, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   tabs: { flexDirection: "row", gap: space.sm, marginTop: space.md },
   tab: {
     paddingHorizontal: space.md,
