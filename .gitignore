@@ -57,4 +57,4 @@ cache/
 *.zip
 *.tar.gz
 coverage/
-.turbo/
+.turbo/apps/web/next-env.d.ts
