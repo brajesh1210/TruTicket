@@ -210,3 +210,24 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 **Checks run:** `tsc --noEmit` pass. Android `expo export` pass. Logic tests (resale cap maths, group rules, gate states, QR window and skew) all pass.
 
 **Not built yet:** camera scanning (needs expo-camera and a new EAS dev build), web portals (organiser and admin, 18 screens), Phase 2 backend.
+
+
+---
+
+## v3 Status — Phase 1 web batch (organiser and admin portals, mock data)
+
+**Built (web, Next.js 15.5.29, React 19.2.3):** all 18 screens from PLAN §4.
+- Organiser (10): Overview, Create event (5-step wizard), Event detail (tabs), Ticket inventory, Resale policy (cap calculator), Fraud monitoring, Gate staff (authorise device), Payouts & settlements, Organisation details (new), Verification status (new).
+- Admin (8): Platform overview, User management, Event moderation, Emergency protocol, Audit logs, Risk events queue, Session investigation, Appeal review.
+- Shared: sidebar, top bar, brand logo (`public/brand/`), design tokens from `packages/ui-tokens/tokens.json` as CSS variables.
+
+**Changed or deviated:**
+- Styling uses plain CSS variables in `src/app/globals.css`, not Tailwind. The starter `tailwind.config.ts` is removed. Reason: keeps one token source shared with mobile.
+- Money is shown in ₹ (Indian grouping). Reference screenshots show $.
+- All data is mock (`src/lib/organiser-data.ts`, `src/lib/admin-data.ts`). Forms validate locally and do not save yet.
+- Risk scores are mock values. The ML service is excluded from this build.
+
+**Checks run:** `tsc --noEmit` pass. `next build` pass (21 routes). Dev server on 0.0.0.0:3000: all 21 routes return 200 (unknown event id returns 404).
+
+**Not built yet:** Supabase auth and RLS, real API calls, Razorpay, role guards on `/organiser` and `/admin`, visual review against the admin reference screenshots, and the Phase 2 backend.
+
