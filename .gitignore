@@ -57,4 +57,6 @@ cache/
 *.zip
 *.tar.gz
 coverage/
-.turbo/apps/web/next-env.d.ts
+.turbo/
+apps/web/next-env.d.ts
+apps/web/tsconfig.tsbuildinfo
