@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
@@ -25,14 +25,27 @@ export default function Profile() {
       </View>
 
       <View style={styles.list}>
-        <Text style={styles.item}>Personal information</Text>
-        <Text style={styles.item}>Security & devices</Text>
-        <Text style={styles.item}>Notification preferences</Text>
-        <Text style={styles.item}>Help & support</Text>
+        <Row label="Security & devices" onPress={() => router.push("/security")} />
+        <Row label="Resale marketplace" onPress={() => router.push("/resale")} />
+        <Row label="Group distribution" onPress={() => router.push({ pathname: "/group/[id]", params: { id: "grp-1" } })} />
+        <Row label="Gate staff (demo)" onPress={() => router.push("/gate")} last />
       </View>
 
       <Button label="Log out" variant="ghost" onPress={onLogout} testID="logout" />
     </Screen>
+  );
+}
+
+function Row({ label, onPress, last }: { label: string; onPress: () => void; last?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.row, !last && styles.rowBorder, pressed && { opacity: 0.7 }]}
+    >
+      <Text style={styles.item}>{label}</Text>
+      <Text style={styles.chev}>›</Text>
+    </Pressable>
   );
 }
 
@@ -67,12 +80,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.bg.border,
   },
-  item: {
-    color: colors.text.primary,
-    fontSize: fontSize.md,
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.bg.border,
   },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: colors.bg.border },
+  item: { color: colors.text.primary, fontSize: fontSize.md },
+  chev: { color: colors.text.muted, fontSize: fontSize.xl },
 });

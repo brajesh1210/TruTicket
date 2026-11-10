@@ -187,3 +187,26 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 1. `feature/mobile-setup` — Ansh/Shivam: expo app runs, Supabase anon client, navigation
 2. `feature/contracts-compile` — Brajesh: hardhat compile + tests passing
 3. `feature/db-seed-functions` — Brajesh: 002 seed + 003 reservation function
+
+
+---
+
+## v3 Status — Phase 1 batch 3 (mobile screens, mock data)
+
+**Built (mobile):**
+- Categories tab (4 categories, event list per category)
+- Resale marketplace (capped listings, transfer count) and Sell-a-ticket (ask capped at face × 110%, 2% demo fee, net to seller)
+- Group distribution manager (FR-027): invite by email, PENDING_CLAIM / CLAIMED, revoke unclaimed invites
+- New-device verification (demo flow: email code, 48-hour cooldown, old device signed out)
+- Security & devices screen
+- Gate staff: scanner camera view, scan result (VALID, ALREADY USED, EXPIRED, WRONG EVENT, INVALID, OFFLINE-UNVERIFIED), scan activity log (no attendee names), manual lookup by ticket ref
+- Ticket detail: Ticket DNA block, List for resale / Cancel listing buttons
+- Profile: links to security, resale, group, gate (demo)
+
+**Changed:**
+- Gate QR window is 10 seconds (PRD 6.4). Earlier builds used 30 seconds.
+- Demo QR text is honest: not secure until the Phase 2 signed credential.
+
+**Checks run:** `tsc --noEmit` pass. Android `expo export` pass. Logic tests (resale cap maths, group rules, gate states, QR window and skew) all pass.
+
+**Not built yet:** camera scanning (needs expo-camera and a new EAS dev build), web portals (organiser and admin, 18 screens), Phase 2 backend.
