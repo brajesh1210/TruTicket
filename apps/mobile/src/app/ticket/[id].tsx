@@ -10,9 +10,9 @@ import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 const REFRESH_SECONDS = 30;
 
 /**
- * Ticket with dynamic QR (mock). The real QR payload is a signed token with a nonce
- * that changes about every 30 seconds (Phase 2/3). This demo builds the payload
- * from the ticket id and a counter, so the image changes on each refresh.
+ * Ticket with a demo QR. The payload is NOT secure yet: it is built on the device from
+ * the ticket id and the 30-second window, so anyone can reproduce it. The real gate QR
+ * is a server-signed token with a nonce, verified by the scanner (Phase 2/3).
  */
 export default function TicketScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,8 +34,12 @@ export default function TicketScreen() {
     );
   }
 
-  const windowIndex = Math.floor(Date.now() / 1000 / REFRESH_SECONDS);
-  const secondsLeft = REFRESH_SECONDS - (tick % REFRESH_SECONDS);
+  // Wall-clock aligned: the QR and the countdown both use the same 30-second window.
+  // `tick` only forces a re-render every second.
+  void tick;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const windowIndex = Math.floor(nowSec / REFRESH_SECONDS);
+  const secondsLeft = REFRESH_SECONDS - (nowSec % REFRESH_SECONDS);
   const payload = `TT|${ticket.id}|${windowIndex}`;
   const isListed = ticket.status === "listed";
 
@@ -65,7 +69,7 @@ export default function TicketScreen() {
 
           {!isListed ? (
             <Text style={styles.refresh}>
-              QR refreshes in {secondsLeft}s. Screenshots do not work at the gate.
+              Demo QR refreshes in {secondsLeft}s. The real gate QR will be signed by the server (Phase 2).
             </Text>
           ) : null}
         </View>

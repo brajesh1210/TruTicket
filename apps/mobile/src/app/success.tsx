@@ -28,7 +28,7 @@ export default function Success() {
         </Text>
         <Text style={styles.total}>Paid ₹{Number(total ?? 0).toLocaleString("en-IN")} (demo)</Text>
         <Text style={styles.note}>
-          Your tickets are in My Tickets. Each ticket has a QR code that changes every 30 seconds, so screenshots do not work at the gate.
+          Your tickets are in My Tickets. This build shows a demo QR. Signed QR codes that rotate every 30 seconds come in Phase 2.
         </Text>
       </View>
 
