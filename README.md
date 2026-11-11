@@ -51,7 +51,6 @@ TruTicket/
 ├── services/api/      # Supabase Edge Functions
 ├── services/ml/       # FastAPI ML Risk Service
 ├── contracts/         # Solidity Smart Contracts
-├── prisma/            # Database Schema & Migrations
 ├── docs/              # Architecture & API Contracts
 ├── n8n/               # Automation Workflows
 └── infra/             # Docker & Deployment Config
