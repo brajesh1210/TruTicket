@@ -12,8 +12,6 @@
     "dev:web": "cd apps/web && npm run dev",
     "dev:mobile": "cd apps/mobile && npx expo start",
     "dev:ml": "cd services/ml && uvicorn main:app --reload",
-    "db:push": "npx prisma db push",
-    "db:generate": "npx prisma generate",
     "contracts:compile": "cd contracts && npx hardhat compile",
     "contracts:test": "cd contracts && npx hardhat test",
     "lint": "echo \"Linting all workspaces...\"",

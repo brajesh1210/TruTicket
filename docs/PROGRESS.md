@@ -231,3 +231,28 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 
 **Not built yet:** Supabase auth and RLS, real API calls, Razorpay, role guards on `/organiser` and `/admin`, visual review against the admin reference screenshots, and the Phase 2 backend.
 
+
+
+---
+
+## Phase 2.1 — Database foundation (auth tables, verification gate, RLS)
+
+**Built:**
+- `supabase/migrations/002_auth_sessions.sql`: `user_emails` (one verified email key per account, several verified emails allowed), `user_identities` (Google subject unique), `user_devices` (one active device, new device pending 48 h), `user_sessions` (one active session), `otp_codes` (HMAC hash only, 10-minute expiry), `rate_limits` plus `rate_limit_hit()`, `normalise_email_key()`, `can_transact()` (verified-email gate), and a profile trigger on `auth.users`.
+- RLS on every new table. Clients read their own rows only. OTP and rate-limit tables and functions are service-only.
+- Removed `profiles.passwordHash` (no passwords in this app). Added FK `profiles.id` to `auth.users`.
+- Dropped Prisma (approved decision). `prisma/` removed. Root `db:push` and `db:generate` scripts removed.
+
+**Tests:**
+- `supabase/tests/002_auth_sessions.test.sql`: 14 groups (T0 to T14). Runs in one transaction and rolls back.
+- `supabase/tests/local_stubs.sql`: recreates Supabase's roles, `auth.users`, `auth.uid()` and default grants for plain Postgres. Local use only.
+- Local run (PGlite, PostgreSQL 18 build): 001, 002 and all 14 test groups pass.
+- Mutation check: 7 deliberately broken variants (missing unique indexes, client access to OTP, RLS off on sessions, gate ignoring verification). Each one is caught.
+
+**Not yet:** not run on the dev Supabase project. Not run on Docker postgres:17 yet.
+
+**Open for package 2.2 and 2.3:**
+- Replace `services/api/supabase/functions/auth`. The current stub uses email and password signup and takes `role` from the request body, which allows privilege escalation. It must not be deployed.
+- Email normalisation removes dots and +tags for Gmail only (plan §5). Other providers allow +tag aliases. Decide whether to extend this.
+- Refresh tokens: use Supabase's built-in rotation (with reuse detection) plus our `user_sessions` row, or build our own rotation table. Decide in 2.3.
+- `profiles` FK needs no profile rows without an auth user. Delete any old test rows before applying 002.

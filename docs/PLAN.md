@@ -115,7 +115,7 @@ Order: **mobile first, then web.** Backend and blockchain run in parallel once t
 - Mock limits (replaced in Phase 2): gate scanning uses sample buttons until expo-camera is in a new EAS dev build; redeemed set is in memory; resale and group state reset on app reload.
 - Done when: all 22 screens are reachable on Expo Go (Android). Flow works: onboarding → login → email OTP → explore → event → queue → select → checkout (mock) → success → my tickets → QR.
 
-### Phase 2 — Backend core: Free auth, sessions, ticketing (L)
+### Phase 2 — Backend core: Free auth, sessions, ticketing (L) — APPROVED 2026-11; 2.1 database in progress
 **Auth**
 - Google One-Tap: server verifies the Google ID token (Supabase `signInWithIdToken`). Google subject stored and unique.
 - Email OTP: 6-digit code, 10-minute expiry, 5 attempts per code, 60-second resend cooldown.
@@ -144,7 +144,7 @@ Order: **mobile first, then web.** Backend and blockchain run in parallel once t
 - Google One-Tap or Email OTP, then TOTP 2FA (mandatory for organiser and admin roles).
 
 **Data and seed**
-- Migration `002_auth_sessions.sql`: `user_emails` (verified_at, unique normalised key), `user_identities` (provider, provider_subject, unique), `user_sessions`, `user_devices`, `rate_limits`. Prisma schema updated to match.
+- Migration `002_auth_sessions.sql`: `user_emails` (verified_at, unique normalised key), `user_identities` (provider, provider_subject, unique), `user_sessions`, `user_devices`, `rate_limits`. Prisma dropped (approved decision): the SQL migrations are the only schema source.
 - Seed `003_seed.sql`: demo attendee and organiser (pre-verified), demo event (Coldplay-style), 3 ticket types (GA, VIP, Student), one scanner device.
 - Functions `004_functions.sql`: atomic inventory reservation with expiry, idempotent gate redemption, resale price-cap check, verification-gate check.
 
