@@ -211,7 +211,6 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 
 **Not built yet:** camera scanning (needs expo-camera and a new EAS dev build), web portals (organiser and admin, 18 screens), Phase 2 backend.
 
-
 ---
 
 ## v3 Status — Phase 1 web batch (organiser and admin portals, mock data)
@@ -230,8 +229,6 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 **Checks run:** `tsc --noEmit` pass. `next build` pass (21 routes). Dev server on 0.0.0.0:3000: all 21 routes return 200 (unknown event id returns 404).
 
 **Not built yet:** Supabase auth and RLS, real API calls, Razorpay, role guards on `/organiser` and `/admin`, visual review against the admin reference screenshots, and the Phase 2 backend.
-
-
 
 ---
 
@@ -256,3 +253,39 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Email normalisation removes dots and +tags for Gmail only (plan §5). Other providers allow +tag aliases. Decide whether to extend this.
 - Refresh tokens: use Supabase's built-in rotation (with reuse detection) plus our `user_sessions` row, or build our own rotation table. Decide in 2.3.
 - `profiles` FK needs no profile rows without an auth user. Delete any old test rows before applying 002.
+
+---
+
+## Phase 2.2 — Auth and verification (Google and email code)
+
+**Built:**
+- `services/api/supabase/functions/auth/index.ts` replaces the password draft. Three actions only: `google` (Google ID token), `otp_request`, `otp_verify`. No passwords, and the role is never taken from the request.
+- Google: the ID token is checked for signature (Google JWKS), issuer, audience (`GOOGLE_CLIENT_IDS`), expiry, and `email_verified`. A new Google login is refused with `EMAIL_LINKED` if the same normalised email is already verified on another account (no silent linking).
+- Email code: 6 digits from a uniform random source, 10-minute expiry, 5 wrong attempts per code, 60-second resend wait, only the newest code is valid. The stored value is an HMAC-SHA256 bound to the email key and purpose. Comparison is constant time. The code is consumed once.
+- Limits (via `rate_limit_hit`): 5 codes per email per hour, 30 per IP per hour, 30 verify guesses per email per 15 minutes.
+- Session: the server creates a normal Supabase session (access and refresh token) with an admin-generated token hash. No email is sent for this step. Refresh rotation is Supabase's built-in. Our `user_sessions` one-session rule is 2.3.
+- Demo hook: only when `DEMO_MODE=true` and the email is in `DEMO_EMAILS`, the code is `DEMO_OTP_CODE` and no email is sent. Off by default. Policy still open (PLAN §6 item 3).
+- Shared helpers in `services/api/supabase/functions/_shared/`: OTP, email key, Google claims and verification, rate limit, accounts (with rollback), session, email sender (Brevo transactional API, free plan 300 emails/day), config, HTTP errors.
+- `supabase/APPLY_TO_SUPABASE_DEV.sql`: 001, then removal of orphan profile rows (no auth user), then 002. One transaction. Re-runnable.
+- `scripts/set-auth-secrets.ps1` and `scripts/deploy-auth.ps1`: set secrets and deploy the function (the deploy script copies to a temp folder, so the repo gets no extra files).
+- `supabase/config.toml`: `auth` has `verify_jwt = false`. The function checks each request itself.
+
+**Tests:**
+- Unit tests (Deno, offline): 26 pass. OTP format, leading zeros, rejection sampling, HMAC binding, constant-time compare, email key rules, Google claim rules, Brevo request shape (URL, api-key header, sender, recipient) and failure handling (mocked fetch).
+- Parity: `emailKey()` in TypeScript and `public.normalise_email_key()` in SQL give the same result on all 7 cases (PGlite).
+- Type check: `deno check auth/index.ts` passes.
+- Request validation, run live (no database needed): bad method (405), bad JSON (400), unknown action (400), bad email (400), bad code format (400), missing Google token (400), bad Google token (401).
+- Combined apply on a simulated dev project (old 001 state with one orphan profile): applied, orphan removed, FK and trigger present; second run OK; the 002 DB tests pass after it.
+
+**Not yet tested:** a real Supabase project (deploy, secrets, real email delivery, real Google token). These happen in the dev project during integration. The mobile wiring is 2.9.
+
+**Decisions made in 2.2:**
+- Session method: admin token hash, then `verifyOtp` (chosen over minting JWTs ourselves).
+- Refresh: Supabase's built-in rotation for now. Reuse-detection and the family revoke are 2.3.
+- Email normalisation: still Gmail-only (open question, PHASE2_PLAN §6).
+- Google sign-in for an email already held by an OTP-only account is refused with `EMAIL_LINKED`. Linking from settings is later.
+
+**Open:**
+- DEMO_MODE policy (PLAN §6 item 3). The hook exists and is off by default.
+- Sample gate buttons vs camera build first (PLAN §6 item 4).
+- Brevo sender: the sender address must be verified in Brevo before sends work. Brevo may ask for account approval before sending. Domain authentication (SPF/DKIM) is recommended before real users.
