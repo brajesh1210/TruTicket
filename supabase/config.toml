@@ -1,0 +1,8 @@
+# Supabase CLI project config (used by scripts/deploy-auth.ps1).
+# Sign-in endpoints must be callable before a user is logged in, so JWT
+# verification is off for "auth". The function itself checks every request.
+project_id = "truticket"
+
+[functions.auth]
+enabled = true
+verify_jwt = false
