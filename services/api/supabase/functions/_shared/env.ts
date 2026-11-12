@@ -15,6 +15,8 @@ export interface Config {
   demoMode: boolean;
   demoEmailKeys: string[];
   demoOtpCode: string;
+  /** False only when ATTESTATION_REQUIRED=false (dev tests without a phone). Default true. */
+  attestationRequired: boolean;
 }
 
 function required(name: string): string {
@@ -60,5 +62,6 @@ export function loadConfig(): Config {
     demoMode,
     demoEmailKeys: list("DEMO_EMAILS").map(emailKey),
     demoOtpCode,
+    attestationRequired: Deno.env.get("ATTESTATION_REQUIRED") !== "false",
   };
 }

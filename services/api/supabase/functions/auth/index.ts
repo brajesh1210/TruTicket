@@ -1,17 +1,18 @@
-// TruTicket auth Edge Function (PHASE2_PLAN §2.2). Replaces the old password draft.
-// Sign-in only: Google ID token, or email code (OTP). No passwords. No client-chosen role.
+// TruTicket auth Edge Function (PHASE2_PLAN §2.2, §2.3). Sign-in only: Google ID token, or
+// email code. No passwords. No client-chosen role.
 //
 // POST body (JSON):
-//   { "action": "google",      "id_token": "..." }
+//   { "action": "google",      "id_token": "...",  "device_key_id": "optional" }
 //   { "action": "otp_request", "email": "name@example.com" }
-//   { "action": "otp_verify",  "email": "name@example.com", "code": "123456" }
+//   { "action": "otp_verify",  "email": "name@example.com", "code": "123456", "device_key_id": "optional" }
+//
+// Each successful sign-in ENDS the account's previous session (2.3): the old refresh token
+// stops working and the old access token is refused by the devices function.
 //
 // Success: { session, user_id, created }   (session = Supabase access + refresh token)
 // Errors:  { error: { code, message } }
-import { allowRequest } from "../_shared/rate_limit.ts";
 import { adminClient } from "../_shared/db.ts";
 import { loadConfig, type Config } from "../_shared/env.ts";
-import { sendOtpEmail } from "../_shared/email.ts";
 import {
   ApiError,
   CORS_HEADERS,
@@ -28,20 +29,26 @@ import {
   findIdentity,
   findVerifiedOwner,
 } from "../_shared/accounts.ts";
-import { issueSession } from "../_shared/session.ts";
+import { activeDeviceRowId, issueSession, sessionIdOf, startSession } from "../_shared/session.ts";
 import { verifyGoogleIdToken } from "../_shared/google.ts";
-import {
-  generateOtpCode,
-  hashOtp,
-  isValidOtpFormat,
-  OTP_MAX_ATTEMPTS,
-  OTP_RESEND_SECONDS,
-  OTP_TTL_SECONDS,
-  timingSafeEqualHex,
-} from "../_shared/otp.ts";
+import { checkCode, sendCode } from "../_shared/otp_flow.ts";
 
-const PURPOSE = "login";
-const INVALID_CODE_MESSAGE = "That code is wrong or has expired. Request a new one.";
+const PURPOSE = "login" as const;
+
+function deviceKeyFrom(body: Record<string, unknown>): string | undefined {
+  return typeof body.device_key_id === "string" && body.device_key_id.length <= 128
+    ? body.device_key_id
+    : undefined;
+}
+
+/** Issues the session and makes it the account's only active one. */
+async function finishSignIn(cfg: Config, admin: ReturnType<typeof adminClient>, userId: string, deviceKeyId?: string) {
+  const session = await issueSession(cfg, admin, userId);
+  const sessionId = sessionIdOf(session);
+  const deviceRowId = await activeDeviceRowId(admin, userId, deviceKeyId);
+  await startSession(admin, { userId, sessionId, deviceRowId });
+  return session;
+}
 
 // ---------- Google ----------
 
@@ -83,17 +90,11 @@ async function signInWithGoogle(cfg: Config, body: Record<string, unknown>) {
     created = true;
   }
 
-  const session = await issueSession(cfg, admin, userId);
+  const session = await finishSignIn(cfg, admin, userId, deviceKeyFrom(body));
   return { session, user_id: userId, created };
 }
 
 // ---------- Email code: request ----------
-
-/** Demo code, only when DEMO_MODE=true and the email is on the demo list. */
-function demoCodeFor(cfg: Config, key: string): string | null {
-  if (cfg.demoMode && cfg.demoEmailKeys.includes(key)) return cfg.demoOtpCode;
-  return null;
-}
 
 async function requestOtp(cfg: Config, req: Request, body: Record<string, unknown>) {
   const rawEmail = typeof body.email === "string" ? body.email : "";
@@ -102,130 +103,22 @@ async function requestOtp(cfg: Config, req: Request, body: Record<string, unknow
   }
   const email = normaliseEmail(rawEmail);
   const key = emailKey(email);
-  const admin = adminClient(cfg);
-
-  // Limits: per email (5 codes an hour) and per IP (30 an hour).
-  const okEmail = await allowRequest(admin, `otp_send:email:${key}`, 3600, 5);
-  const okIp = await allowRequest(admin, `otp_send:ip:${clientIp(req)}`, 3600, 30);
-  if (!okEmail || !okIp) {
-    throw new ApiError(429, "RATE_LIMITED", "Too many code requests. Try again later.", {
-      retry_after: 3600,
-    });
-  }
-
-  // 60-second resend wait. The reply does not show whether an account exists.
-  const since = new Date(Date.now() - OTP_RESEND_SECONDS * 1000).toISOString();
-  const { data: recent, error: recentError } = await admin
-    .from("otp_codes")
-    .select("id")
-    .eq("email_key", key)
-    .eq("purpose", PURPOSE)
-    .gte("created_at", since)
-    .limit(1);
-  if (recentError) throw recentError;
-  if (recent && recent.length > 0) {
-    throw new ApiError(429, "RESEND_WAIT", "Please wait a minute before requesting another code.", {
-      retry_after: OTP_RESEND_SECONDS,
-    });
-  }
-
-  const demoCode = demoCodeFor(cfg, key);
-  const code = demoCode ?? generateOtpCode();
-
-  // Only the newest code is valid. Retire older unused codes for this email.
-  const { error: retireError } = await admin
-    .from("otp_codes")
-    .update({ consumed_at: new Date().toISOString() })
-    .eq("email_key", key)
-    .eq("purpose", PURPOSE)
-    .is("consumed_at", null);
-  if (retireError) throw retireError;
-
-  const { error: insertError } = await admin.from("otp_codes").insert({
-    email_key: key,
-    purpose: PURPOSE,
-    code_hash: await hashOtp(cfg.otpSecret, key, PURPOSE, code),
-    max_attempts: OTP_MAX_ATTEMPTS,
-    expires_at: new Date(Date.now() + OTP_TTL_SECONDS * 1000).toISOString(),
-  });
-  if (insertError) throw insertError;
-
-  if (demoCode === null) {
-    await sendOtpEmail(cfg, email, code);
-  }
-
-  return { sent: true, expires_in: OTP_TTL_SECONDS, resend_in: OTP_RESEND_SECONDS };
+  return await sendCode(cfg, adminClient(cfg), { email, key, purpose: PURPOSE, ip: clientIp(req) });
 }
 
 // ---------- Email code: verify ----------
 
-async function verifyOtp(cfg: Config, req: Request, body: Record<string, unknown>) {
+async function verifyOtp(cfg: Config, body: Record<string, unknown>) {
   const rawEmail = typeof body.email === "string" ? body.email : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
-  if (!isValidEmail(rawEmail) || !isValidOtpFormat(code)) {
+  if (!isValidEmail(rawEmail)) {
     throw new ApiError(400, "INVALID_INPUT", "Enter your email and the 6-digit code.");
   }
   const email = normaliseEmail(rawEmail);
   const key = emailKey(email);
   const admin = adminClient(cfg);
 
-  // Limit on all guesses for this email (30 in 15 minutes), on top of the per-code limit.
-  if (!(await allowRequest(admin, `otp_verify:email:${key}`, 900, 30))) {
-    throw new ApiError(429, "RATE_LIMITED", "Too many attempts. Try again later.", {
-      retry_after: 900,
-    });
-  }
-
-  const { data: rows, error: rowsError } = await admin
-    .from("otp_codes")
-    .select("id, code_hash, attempts, max_attempts, expires_at")
-    .eq("email_key", key)
-    .eq("purpose", PURPOSE)
-    .is("consumed_at", null)
-    .order("created_at", { ascending: false })
-    .limit(1);
-  if (rowsError) throw rowsError;
-
-  const row = rows && rows.length > 0 ? rows[0] : null;
-  if (!row || new Date(row.expires_at).getTime() <= Date.now()) {
-    throw new ApiError(401, "OTP_INVALID", INVALID_CODE_MESSAGE);
-  }
-  if (row.attempts >= row.max_attempts) {
-    throw new ApiError(429, "OTP_LOCKED", "Too many wrong codes. Request a new code.");
-  }
-
-  // Count this guess before checking it, so guesses cannot skip the count.
-  // The update only succeeds if attempts still has the value we read.
-  const { data: bumped, error: bumpError } = await admin
-    .from("otp_codes")
-    .update({ attempts: row.attempts + 1 })
-    .eq("id", row.id)
-    .eq("attempts", row.attempts)
-    .select("id");
-  if (bumpError) throw bumpError;
-  if (!bumped || bumped.length === 0) {
-    throw new ApiError(409, "OTP_BUSY", "Please try again.");
-  }
-
-  const expected = await hashOtp(cfg.otpSecret, key, PURPOSE, code);
-  if (!timingSafeEqualHex(expected, row.code_hash)) {
-    const attemptsLeft = row.max_attempts - (row.attempts + 1);
-    throw new ApiError(401, "OTP_INVALID", INVALID_CODE_MESSAGE, {
-      attempts_left: Math.max(attemptsLeft, 0),
-    });
-  }
-
-  // Correct code. Consume it. Only one request can win this update, so a code works once.
-  const { data: consumed, error: consumeError } = await admin
-    .from("otp_codes")
-    .update({ consumed_at: new Date().toISOString() })
-    .eq("id", row.id)
-    .is("consumed_at", null)
-    .select("id");
-  if (consumeError) throw consumeError;
-  if (!consumed || consumed.length === 0) {
-    throw new ApiError(401, "OTP_INVALID", INVALID_CODE_MESSAGE);
-  }
+  await checkCode(cfg, admin, { key, purpose: PURPOSE, code });
 
   let userId = await findVerifiedOwner(admin, key);
   let created = false;
@@ -236,7 +129,7 @@ async function verifyOtp(cfg: Config, req: Request, body: Record<string, unknown
     created = true;
   }
 
-  const session = await issueSession(cfg, admin, userId);
+  const session = await finishSignIn(cfg, admin, userId, deviceKeyFrom(body));
   return { session, user_id: userId, created };
 }
 
@@ -260,7 +153,7 @@ Deno.serve(async (req) => {
       case "otp_request":
         return json(await requestOtp(cfg, req, body));
       case "otp_verify":
-        return json(await verifyOtp(cfg, req, body));
+        return json(await verifyOtp(cfg, body));
       default:
         throw new ApiError(400, "INVALID_ACTION", "Unknown action.");
     }
