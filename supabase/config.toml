@@ -6,3 +6,7 @@ project_id = "truticket"
 [functions.auth]
 enabled = true
 verify_jwt = false
+
+[functions.devices]
+enabled = true
+verify_jwt = false

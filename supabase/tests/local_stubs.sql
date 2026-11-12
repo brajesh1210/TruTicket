@@ -32,3 +32,19 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+
+-- ---- Added for 002b (session guard) ----
+-- auth.sessions: one row per Supabase login session. Deleting a row also removes
+-- its refresh tokens in Supabase (here the cascade is only modelled by the row).
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  not_after  timestamptz
+);
+
+-- Same contract as Supabase: the verified access-token claims for this request.
+CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb
+LANGUAGE sql STABLE AS $$
+  SELECT coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb;
+$$;
