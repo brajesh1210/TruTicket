@@ -1,6 +1,6 @@
 // TruTicket Razorpay webhook (PHASE2_PLAN §2.6). Called by Razorpay, not by the app.
 // No JWT (config.toml). The signature over the RAW body is the only gate.
-// Events: payment.captured -> tickets issued; payment.failed -> hold released.
+// Events: payment.captured -> tickets issued (or a resale transfer); payment.failed -> hold released.
 // Replays are safe: each event id is stored once.
 import { adminClient } from "../_shared/db.ts";
 import { loadConfig } from "../_shared/env.ts";
@@ -49,21 +49,33 @@ Deno.serve(async (req) => {
     if (!rzpOrder.startsWith("order_")) throw new ApiError(400, "INVALID_INPUT", "Missing order id.");
 
     const admin = adminClient(cfg);
+    // A resale payment (PHASE2_PLAN §2.8) has its own attempt row. Everything else is a ticket order.
+    const { data: resaleRow, error: resaleErr } = await admin
+      .from("resale_payments")
+      .select("id")
+      .eq("providerOrderId", rzpOrder)
+      .maybeSingle();
+    if (resaleErr) throw resaleErr;
+    const isResale = resaleRow !== null;
+
     let result: unknown;
     if (kind === "payment.captured") {
-      const { data, error } = await admin.rpc("apply_payment_captured", {
+      const args = {
         p_event_id: eventId,
         p_rzp_order: rzpOrder,
         p_rzp_payment: String(entity.id ?? ""),
         p_amount: Number(entity.amount ?? -1),
-      });
+      };
+      const { data, error } = isResale
+        ? await admin.rpc("apply_resale_captured", args)
+        : await admin.rpc("apply_payment_captured", args);
       if (error) throw error;
       result = data;
     } else {
-      const { data, error } = await admin.rpc("apply_payment_failed", {
-        p_event_id: eventId,
-        p_rzp_order: rzpOrder,
-      });
+      const args = { p_event_id: eventId, p_rzp_order: rzpOrder };
+      const { data, error } = isResale
+        ? await admin.rpc("apply_resale_failed", args)
+        : await admin.rpc("apply_payment_failed", args);
       if (error) throw error;
       result = data;
     }
