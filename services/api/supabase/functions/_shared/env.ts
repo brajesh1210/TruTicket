@@ -17,6 +17,10 @@ export interface Config {
   demoOtpCode: string;
   /** False only when ATTESTATION_REQUIRED=false (dev tests without a phone). Default true. */
   attestationRequired: boolean;
+  /** Razorpay (2.6). Empty until the keys are set. Orders refuse to run without them. */
+  razorpayKeyId: string;
+  razorpayKeySecret: string;
+  razorpayWebhookSecret: string;
 }
 
 function required(name: string): string {
@@ -63,5 +67,8 @@ export function loadConfig(): Config {
     demoEmailKeys: list("DEMO_EMAILS").map(emailKey),
     demoOtpCode,
     attestationRequired: Deno.env.get("ATTESTATION_REQUIRED") !== "false",
+    razorpayKeyId: Deno.env.get("RAZORPAY_KEY_ID") ?? "",
+    razorpayKeySecret: Deno.env.get("RAZORPAY_KEY_SECRET") ?? "",
+    razorpayWebhookSecret: Deno.env.get("RAZORPAY_WEBHOOK_SECRET") ?? "",
   };
 }

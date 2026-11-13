@@ -40,7 +40,7 @@ Copy-Item (Join-Path $repo 'supabase\config.toml') (Join-Path $stage 'supabase\c
 
 Push-Location $stage
 try {
-  foreach ($fn in @('auth', 'devices', 'events')) {
+  foreach ($fn in @('auth', 'devices', 'events', 'orders', 'razorpay_webhook')) {
     Write-Host "Deploying $fn ..." -ForegroundColor Cyan
     npx --yes supabase@2 functions deploy $fn --no-verify-jwt --use-api --project-ref $ProjectRef
     if ($LASTEXITCODE -ne 0) { throw "deploy of $fn failed with code $LASTEXITCODE" }
@@ -50,4 +50,4 @@ finally {
   Pop-Location
 }
 
-Write-Host "auth, devices and events functions deployed to project $ProjectRef" -ForegroundColor Green
+Write-Host "auth, devices, events, orders and razorpay_webhook functions deployed to project $ProjectRef" -ForegroundColor Green
