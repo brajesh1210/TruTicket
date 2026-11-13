@@ -32,6 +32,8 @@ import {
 import { activeDeviceRowId, issueSession, sessionIdOf, startSession } from "../_shared/session.ts";
 import { verifyGoogleIdToken } from "../_shared/google.ts";
 import { checkCode, sendCode } from "../_shared/otp_flow.ts";
+import { enforceLimit } from "../_shared/rate_limit.ts";
+import { GOOGLE_IP_LIMIT, ipKey } from "../_shared/limits.ts";
 
 const PURPOSE = "login" as const;
 
@@ -149,6 +151,14 @@ Deno.serve(async (req) => {
 
     switch (body.action) {
       case "google":
+        // Per-IP limit before the Google token is checked (2.4).
+        await enforceLimit(
+          adminClient(cfg),
+          ipKey("google", clientIp(req)),
+          GOOGLE_IP_LIMIT.windowSeconds,
+          GOOGLE_IP_LIMIT.max,
+          "Too many sign-in attempts. Try again later.",
+        );
         return json(await signInWithGoogle(cfg, body));
       case "otp_request":
         return json(await requestOtp(cfg, req, body));
