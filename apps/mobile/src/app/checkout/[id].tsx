@@ -5,6 +5,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
 import { canTransact, useAuth } from "../../auth/session";
+import { ensureDeviceLinked } from "../../auth/device";
 import { useEvent } from "../../services/events";
 import { checkoutPageUrl, createOrder, reserveTickets } from "../../services/checkout";
 import { ApiError, messageOf } from "../../services/errors";
@@ -54,6 +55,9 @@ export default function Checkout() {
     setPayError(null);
     setPaying(true);
     try {
+      // Links this phone to the sign-in (no-op after the first time). The server refuses
+      // purchases from an unlinked session, so this must run before the hold.
+      if (session) await ensureDeviceLinked(session.userId);
       const hold = await reserveTickets(tr.id, qty);
       const order = await createOrder(hold.reservation_id);
       setPaying(false);

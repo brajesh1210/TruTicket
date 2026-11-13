@@ -1,6 +1,6 @@
 # TruTicket — Progress Tracker
 
-_Last updated: 2026-11-13. Progress file is kept in the workspace and is NOT committed. Update it at every step._
+_Last updated: 2026-11-13 (fix 1 for purchase device link added). Progress file is kept in the workspace and is NOT committed. Update it at every step._
 
 Legend: [x] done · [~] scaffold/draft exists but not tested · [ ] not started
 
@@ -581,6 +581,14 @@ Checks (13 Nov):
 - Deno (all Edge Functions, incl. checkout page): 108 pass
 - `deno check` for `checkout/index.ts` and `tickets/index.ts`: pass
 - Lockfile: only `expo-camera` and `expo-secure-store` added (86 lines)
+
+Fix 1 (13 Nov, after first device test): purchase blocked with "Verify your email and sign in again before you buy tickets."
+- Cause: `session_can_transact()` (002b) needs the sign-in session linked to an ACTIVE device. The app never registered a device or sent `device_key_id`, so every buyer was blocked. Email was verified; the error was the device link.
+- [x] `src/auth/device.ts`: device id in secure storage; `ensureDeviceLinked(userId)` = devices `challenge` → `register` (once per account; `DEVICE_EXISTS` counts as done)
+- [x] `auth/session.ts`: sign-in (google, otp_verify) sends `device_key_id`; after sign-in the device link runs in the background (sign-in does not fail if it does)
+- [x] `checkout/[id].tsx`: link runs before the hold, so existing sign-ins are fixed without signing in again
+- Needs on DEV only: `ATTESTATION_REQUIRED=false` (Edge secret, `truticket-dev` ref). Production keeps attestation on (Phase 2b).
+- Checks: `tsc --noEmit` pass; `expo export --platform android` pass (new code in bundle). DEV purchase test: pending (user).
 
 Dev test (user, after deploy): demo attendee sign-in with the DEV demo code → events list → checkout with Razorpay test mode → tickets appear → QR → organiser scans (camera) → VALID, then ALREADY USED on the second scan.
 

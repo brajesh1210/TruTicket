@@ -24,6 +24,7 @@ import {
   type StoredSession,
 } from "./tokens";
 import { isValidEmail, normalizeEmail } from "./email";
+import { ensureDeviceLinked, getDeviceKeyId } from "./device";
 
 export { DEMO_MODE, DEMO_EMAIL };
 
@@ -104,6 +105,9 @@ async function startSession(body: SignInBody, email: string, provider: "google" 
   };
   await saveSession(stored);
   setState({ session: toSession(stored), pendingEmail: null });
+  // Link this phone to the new session. A failure here must not block sign-in: checkout
+  // retries the link and shows the server's message if it still fails.
+  void ensureDeviceLinked(body.user_id).catch(() => undefined);
 }
 
 export type AuthResult = { ok: true } | { ok: false; error: string };
@@ -156,6 +160,7 @@ export async function signInWithGoogle(): Promise<AuthResult> {
     const body = await callFunction<SignInBody & { created?: boolean }>("auth", {
       action: "google",
       id_token: idToken,
+      device_key_id: await getDeviceKeyId(),
     });
     await startSession(body, normalizeEmail(user.email), "google", user.id);
     return { ok: true };
@@ -203,6 +208,7 @@ export async function verifyEmailOtp(code: string): Promise<AuthResult> {
       action: "otp_verify",
       email,
       code: code.trim(),
+      device_key_id: await getDeviceKeyId(),
     });
     await startSession(body, email, "email");
     return { ok: true };
