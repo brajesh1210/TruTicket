@@ -523,3 +523,33 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - A buyer who pays for a listing and then gets `payment.failed` on the same Razorpay order, then succeeds on a retry, is refused and flagged `refund_needed`. Safe, but it needs a human to refund.
 - Group order quantity: each purchase request is capped at 10 tickets (`reserve_inventory`). Corporate teams buy in several requests until the per-account limit (set on the ticket type).
 - Mobile wiring (2.9) and RLS tests (2.10) are not part of 2.8.
+
+## Phase 2.10 — RLS, grants, audit and security pass
+
+**Built (branch `feature/phase2-10-security`, on top of `main` after 2.8):**
+- `supabase/migrations/008_client_grants.sql`: clients (`anon`, `authenticated`) lose TRUNCATE on all public tables, and for future tables. TRUNCATE skips RLS, so it is blocked at grant level. Row writes were already blocked by RLS.
+- `supabase/migrations/009_audit_append_only.sql`:
+  - Status changes on `tickets`, `orders`, `resale_listings`, `group_tickets` write one `audit_logs` row (`STATUS_CHANGED`, outcome `OLD -> NEW`). Owner changes on `tickets` write `OWNER_CHANGED`. Written by trigger, so edge functions do not need to remember it. Closes the "audit in 2.10" gap noted in 2.8.
+  - `audit_logs` is append-only: UPDATE, DELETE and TRUNCATE are refused for every role, service role included.
+- `supabase/APPLY_2_10_TO_SUPABASE_DEV.sql`: 008 + 009 with a dev header. Dev only. Safe to run twice.
+- `supabase/tests/010_rls_and_grants.test.sql`: T82 to T90, one transaction, ends with ROLLBACK.
+  - T82: buyers see only their own orders and tickets. T83: draft events are hidden from anon and attendees; published events are public. T84: resale listings, resale payments, group tickets and QR credentials are closed to clients. T85: no client can run any 2.8 function. T86: an unverified account is refused for list, buy, invite, keep and claim. T87: RLS is on for every public table. T88: the only write policy is `profiles_self_update`; no client can delete or truncate. T89: status and owner changes are audited, and a no-op update writes nothing. T90: `audit_logs` refuses UPDATE, DELETE and TRUNCATE.
+
+**Tests:**
+- Database (PGlite): full chain 001 to 007, then 008, 009, 010. All pass. Earlier suites re-run on the same code: 002, 002b (`run_apply23`), 004 inventory, 005 orders, 006 tickets. All pass.
+- Mutation check (`mutate_rls.mjs`): 14 of 14 caught. Covers drafts visible, public read on listings and payments, owner policy opened, `can_transact` removed from list and claim, 2.8 functions granted to anon, TRUNCATE grant returned, extra write policy, RLS off, audit trigger on INSERT only, audit DELETE allowed, audit TRUNCATE trigger removed, status change not audited.
+- Deno: 93 pass, 0 fail (unchanged).
+- Gitleaks v8.24.2 over the repo: 2 hits, both test dummy values (`qr_test.ts` test key string and `devices_test.ts` generated test public key). No real secret found. Not added to an ignore list.
+- Client code: no `service_role` or secret key in `apps/`. Mobile uses the anon key only.
+
+**Not yet verified on dev:** the 008 and 009 SQL (`APPLY_2_10_TO_SUPABASE_DEV.sql`). Read-only checks are in the guide.
+
+**Known gaps (2.10):**
+- Audit rows have `actorId` NULL. The database does not know who made a change through the service role. Add the actor when the functions pass it in.
+- Audit covers status and owner changes only. Inserts (a new listing, a new order) are not audited.
+- No retention or purge path for `audit_logs`. Append-only also blocks the service role. A reviewed purge step is needed later.
+- The 2.3 accepted gap is unchanged: reused refresh token does not revoke the family on dev (reuse checks 7 and 8 fail). 2.10 does not claim it is fixed.
+- `apps/mobile/src/auth/session.ts` has a hardcoded demo OTP (`123456`) and demo emails `@truticket.test`. Dev uses `@example.com` and a `DEMO_OTP_CODE` secret. Replace in 2.9 (mobile wiring) and ensure the demo path is only reachable with `DEMO_MODE=true`.
+- The OTP per-email limit (30 guesses per 15 min) is in `otp_flow.ts`, not yet in `limits.ts`.
+
+
