@@ -64,8 +64,28 @@ Deno.serve(async (req) => {
       if (msg.includes("KEY_REUSED")) throw new ApiError(409, "KEY_REUSED", "This scan key was used for another ticket.");
       throw error;
     }
+    // Phase 3: mark the NFT redeemed on chain. Best effort: the DB result is the gate truth,
+    // a failed chain call never changes the scan result. n8n reconciles the rest later.
+    if (data === "VALID") await redeemOnChainBestEffort(check.ticketId);
     return json({ ok: true, result: data });
   } catch (e) {
     return errorResponse(e);
   }
 });
+
+async function redeemOnChainBestEffort(ticketId: string): Promise<void> {
+  const url = Deno.env.get("CHAIN_FUNCTION_URL") ?? "";
+  const secret = Deno.env.get("CHAIN_INTERNAL_SECRET") ?? "";
+  if (!url || !secret) return; // chain not configured yet (e.g. before Amoy deploy)
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-secret": secret },
+      body: JSON.stringify({ action: "redeem", ticket_id: ticketId }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) console.error("chain redeem failed", res.status);
+  } catch (e) {
+    console.error("chain redeem error", e instanceof Error ? e.name : "unknown");
+  }
+}

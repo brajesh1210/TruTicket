@@ -38,3 +38,8 @@ verify_jwt = false
 [functions.groups]
 enabled = true
 verify_jwt = false
+
+[functions.chain]
+enabled = true
+# Internal only: needs the x-internal-secret header, not a user JWT.
+verify_jwt = false

@@ -1,33 +1,28 @@
-version: "3.8"
+# TruTicket n8n (Phase 5). Runs on your PC with Docker Desktop.
+# No public URL is needed: every workflow polls the database every minute.
+# Setup: copy infra\.env.example to infra\.env and fill it in. Never commit infra\.env.
+# Start:  docker compose -f infra\docker-compose.yml up -d
+# Open:   http://localhost:5678
 
 services:
-  # Supabase is managed — use hosted Supabase for free tier
-  # Local development only if self-hosting
-
-  ml-service:
-    build:
-      context: ./services/ml
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - ML_MODEL_PATH=./model/risk_model.pkl
-    volumes:
-      - ./services/ml:/app
-
   n8n:
-    image: n8nio/n8n
+    image: n8nio/n8n:1
     ports:
       - "5678:5678"
+    env_file:
+      - .env
     environment:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - TZ=Asia/Kolkata
       - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=changeme
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:?Set N8N_PASSWORD in infra/.env first}
+      # The workflows read secrets from $env. Needed for this setup.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
     volumes:
       - ./n8n:/home/node/.n8n
-
-volumes:
-  n8n_data:
+      - ../n8n/workflows:/home/node/workflows:ro
+    restart: unless-stopped

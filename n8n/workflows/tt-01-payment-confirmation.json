@@ -1,0 +1,147 @@
+{
+  "id": "tt-01-payment-confirmation",
+  "name": "TruTicket 01 - Payment confirmation",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/orders?status=eq.TICKET_ISSUED&updatedAt=gte.{{ $now.minus({ days: 1 }).toUTC().toISO() }}&select=id,buyerId,totalMinor,currency&limit=100",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Read source rows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst r = $json;\nif (!r || !r.id) return [];\nconst recipient = r.buyerId;\nif (!recipient) return [];\nreturn [{ json: { row: {\n  kind: 'PAYMENT_CONFIRMED',\n  dedupeKey: 'PAYMENT_CONFIRMED:' + r.id,\n  recipientId: recipient,\n  payload: { order_id: r.id, total_minor: r.totalMinor, currency: r.currency }\n} } }];\n"
+      },
+      "name": "Build outbox row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/notification_outbox?on_conflict=dedupeKey",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ [$json.row] }}",
+        "options": {}
+      },
+      "name": "Insert outbox row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Read source rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read source rows": {
+      "main": [
+        [
+          {
+            "node": "Build outbox row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build outbox row": {
+      "main": [
+        [
+          {
+            "node": "Insert outbox row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Producer. Sends the buyer a confirmation once per order (dedupeKey PAYMENT_CONFIRMED:<orderId>)."
+  },
+  "tags": [],
+  "pinData": {}
+}

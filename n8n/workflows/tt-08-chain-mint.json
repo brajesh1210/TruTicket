@@ -1,0 +1,121 @@
+{
+  "id": "tt-08-chain-mint",
+  "name": "TruTicket 08 - Mint tickets on chain",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tickets?status=eq.ISSUED_ACTIVE&tokenId=is.null&select=id&order=createdAt.asc&limit=20",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Read unminted tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CHAIN_FUNCTION_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-secret",
+              "value": "={{ $env.CHAIN_INTERNAL_SECRET }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { action: 'mint', ticket_id: $json.id } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Mint on chain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Read unminted tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read unminted tickets": {
+      "main": [
+        [
+          {
+            "node": "Mint on chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Calls the chain function with action=mint for issued tickets with no tokenId. A failed mint leaves tokenId NULL and is retried next minute. Resale, group and redeem sync are NOT in this workflow yet."
+  },
+  "tags": [],
+  "pinData": {}
+}
