@@ -25,6 +25,8 @@ import {
   readJsonObject,
 } from "../_shared/http.ts";
 import { checkCode, sendCode } from "../_shared/otp_flow.ts";
+import { enforceLimit } from "../_shared/rate_limit.ts";
+import { DEVICE_ACTION_LIMITS, DEVICES_IP_LIMIT, deviceActionKey, ipKey } from "../_shared/limits.ts";
 import { sessionIdFromAccessToken } from "../_shared/session_token.ts";
 import { AUTH_INVALID_MESSAGE, authErrorFor } from "../_shared/auth_errors.ts";
 import { endOtherSessions } from "../_shared/session.ts";
@@ -323,8 +325,28 @@ Deno.serve(async (req) => {
 
   try {
     const cfg = loadConfig();
+    // Per-IP first, so bad tokens and bad bodies are capped too (2.4).
+    await enforceLimit(
+      adminClient(cfg),
+      ipKey("devices", clientIp(req)),
+      DEVICES_IP_LIMIT.windowSeconds,
+      DEVICES_IP_LIMIT.max,
+      "Too many phone requests. Try again later.",
+    );
     const body = await readJsonObject(req);
     const caller = await authenticate(cfg, req);
+
+    // Per-account limit for each action (2.4).
+    const rule = typeof body.action === "string" ? DEVICE_ACTION_LIMITS[body.action] : undefined;
+    if (rule) {
+      await enforceLimit(
+        adminClient(cfg),
+        deviceActionKey(body.action as string, caller.userId),
+        rule.windowSeconds,
+        rule.max,
+        "Too many phone requests. Try again later.",
+      );
+    }
 
     switch (body.action) {
       case "status":
