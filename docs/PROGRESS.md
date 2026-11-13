@@ -299,7 +299,8 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 | 2.3 | Sessions, devices, attestation | PR open (`feature/phase2-3-sessions`, commit `9a672de`). Dev: 6 of 8 checks. **Known gap: refresh reuse.** |
 | 2.4 | Rate limits | Branch `feature/phase2-4-rate-limits` (commit `fca9f17`), on top of 2.3. Deployed to dev. Tests 71 pass. |
 | 2.5 | Events and inventory | Branch `feature/phase2-5-inventory`, on top of 2.4. DB checks 15 pass (PGlite), 4 mutants caught. Dev run pending. |
-| 2.6 to 2.10 | Orders, tickets, resale, mobile wiring, RLS tests | Not started. |
+| 2.6 | Orders and Razorpay Test | Branch `feature/phase2-6-orders`, on top of 2.5. DB checks T35 to T43 pass (PGlite), 6 of 6 mutants caught. Deno 76 pass. Dev run pending. |
+| 2.7 to 2.10 | Tickets, resale, mobile wiring, RLS tests | Not started. |
 
 ## Phase 2.3 — Sessions and devices (single session, device binding, Android attestation)
 
@@ -408,4 +409,38 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Reservations expire by time only. The cron that calls `release_expired_reservations()` is not set up yet. Expired holds are ignored by the count, so the cron is for tidiness.
 - An event goes live only when an admin sets it to `published`. No admin screen does that yet (web, Phase 4).
 - Demo accounts use `@example.com` addresses and `DEMO_MODE=true` on dev only. Never on production.
+
+## Phase 2.6 — Orders and Razorpay Test
+
+**Built (branch `feature/phase2-6-orders`, on top of 2.5):**
+- `supabase/migrations/005_orders.sql`: `begin_order()` (turns a live hold into an order, once; a retry returns the same order), `record_provider_order()`, `apply_payment_captured()` (issues one ticket per seat, one settlement row, marks the hold converted), `apply_payment_failed()` (releases the hold). Service role only.
+  - Each webhook event id is stored once in `payment_webhook_events`. A replay returns `DUPLICATE` and changes nothing.
+  - Amount must equal the order total in paise, or nothing is issued (`AMOUNT_MISMATCH`).
+  - If the hold expired while the buyer paid, tickets are still issued when seats are free. If the seats are gone, the order moves to `REFUND_PENDING` (`SOLD_OUT_AFTER_PAYMENT`).
+  - An unknown Razorpay order raises an error, so the webhook returns 500 and Razorpay retries later.
+- `services/api/supabase/functions/orders/index.ts`: action `create` (signed-in buyer, hold id). Checks the full gate `session_can_transact()` with the buyer's own token, then creates the Razorpay TEST order. Returns the Razorpay order id and key id.
+- `services/api/supabase/functions/razorpay_webhook/index.ts`: verifies `X-Razorpay-Signature` (HMAC-SHA256 of the raw body) before anything else. Handles `payment.captured` and `payment.failed`. No JWT (Razorpay calls it).
+- `services/api/supabase/functions/_shared/razorpay.ts`: signature check (fails closed) and the order call (test keys only in practice; refuses to run without keys).
+- `services/api/supabase/functions/_shared/buyer.ts`: bearer token and active session check, then `session_can_transact()`.
+- `services/api/supabase/functions/_shared/env.ts`: adds `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
+- `supabase/APPLY_2_6_TO_SUPABASE_DEV.sql`: 005 with a dev header. Dev only.
+- `scripts/set-payments-secrets.ps1`: asks for the Razorpay TEST keys (hidden input). Refuses keys that do not start with `rzp_test_`. Dev only.
+- `scripts/test-orders-dev.ps1`: end-to-end dev check (sign in demo attendee, hold, order, signed webhook: ISSUED, replay: DUPLICATE, wrong signature: 401).
+- `supabase/DEV_ONLY_2_6_demo_attendee_device.sql`: dev only. Adds a fake active device for the demo attendee, so a dev sign-in passes the purchase gate. The sign-in passes `device_key_id` (`dev-demo-attendee-device`).
+- `scripts/deploy-functions.ps1`: now deploys `orders` and `razorpay_webhook` too (both `--no-verify-jwt`). `supabase/config.toml`: both functions added.
+
+**Tests:**
+- Database (PGlite, PG 18): `supabase/tests/005_orders.test.sql`, T35 to T43, one transaction, ends with ROLLBACK. Chain: stubs, 001, 002, 002b, 004, 003, accounts, 003, 005, then the tests. All pass.
+- Mutation check (`mutate_orders.mjs`): 6 of 6 caught (no amount check, no duplicate guard, no already-issued guard, no expiry check, failed payment does not release, begin_order not idempotent).
+- Deno: 76 pass (71 from 2.4 plus 5 new in `razorpay_test.ts`). `deno check` exit 0 on `auth`, `devices`, `events`, `orders`, `razorpay_webhook`.
+
+**Not yet tested:** on the real dev project (needs 2.5 Part D done, Razorpay TEST keys, and the webhook URL set in Razorpay); real Razorpay Checkout payment (comes with the mobile wiring, 2.9); concurrent orders (PGlite is single-session); Docker PG 17 (optional).
+
+**Known gaps and decisions (2.6):**
+- The dev test simulates the signed webhook. It does not pay with a real test card. A real test payment is checked in 2.9 with Razorpay Checkout on the phone.
+- Refunds are not automatic. A `REFUND_PENDING` order needs a manual refund in the Razorpay dashboard for now.
+- Holds still expire by time only (no cron yet), as in 2.5.
+- The webhook uses the `X-Razorpay-Event-Id` header when present, and a hash of the body if it is missing. Confirm on the first live test that Razorpay sends the header.
+- Ticket price is the ticket type's face value. Fees and GST are not handled in 2.6.
+- The first dev run failed with `CANNOT_TRANSACT`. Cause: the test sign-in had no device link, so `session_can_transact()` correctly refused it. Fix: the dev device fixture and `device_key_id` at sign-in. The gate itself was not changed.
 
