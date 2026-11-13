@@ -299,8 +299,10 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 | 2.3 | Sessions, devices, attestation | PR open (`feature/phase2-3-sessions`, commit `9a672de`). Dev: 6 of 8 checks. **Known gap: refresh reuse.** |
 | 2.4 | Rate limits | Branch `feature/phase2-4-rate-limits` (commit `fca9f17`), on top of 2.3. Deployed to dev. Tests 71 pass. |
 | 2.5 | Events and inventory | Branch `feature/phase2-5-inventory`, on top of 2.4. DB checks 15 pass (PGlite), 4 mutants caught. Dev run pending. |
-| 2.6 | Orders and Razorpay Test | Branch `feature/phase2-6-orders`, on top of 2.5. DB checks T35 to T43 pass (PGlite), 6 of 6 mutants caught. Deno 76 pass. Dev run pending. |
-| 2.7 to 2.10 | Tickets, resale, mobile wiring, RLS tests | Not started. |
+| 2.6 | Orders and Razorpay Test | Merged to `main`. Dev end-to-end passed (3 of 3). DB checks T35 to T43, 6 of 6 mutants caught. |
+| 2.7 | Tickets, rotating QR, gate scan | Branch `feature/phase2-7-tickets` (commit `08147f8`, pushed). DB checks T44 to T56 pass (PGlite), 8 of 8 mutants caught. Deno 82 pass. Dev gate test: 4 of 4 pass (13 Nov). |
+| 2.8 | Resale price cap, transfers, group tickets (FR-027) | Branch `feature/phase2-8-resale-group`, on top of 2.7. DB checks T57 to T80 pass (PGlite), 12 of 12 mutants caught. Deno 93 pass. Dev run pending (`test-resale-dev.ps1`). |
+| 2.9 to 2.10 | Mobile wiring (expo-camera build), RLS and auth tests | Not started. |
 
 ## Phase 2.3 — Sessions and devices (single session, device binding, Android attestation)
 
@@ -434,7 +436,9 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Mutation check (`mutate_orders.mjs`): 6 of 6 caught (no amount check, no duplicate guard, no already-issued guard, no expiry check, failed payment does not release, begin_order not idempotent).
 - Deno: 76 pass (71 from 2.4 plus 5 new in `razorpay_test.ts`). `deno check` exit 0 on `auth`, `devices`, `events`, `orders`, `razorpay_webhook`.
 
-**Not yet tested:** on the real dev project (needs 2.5 Part D done, Razorpay TEST keys, and the webhook URL set in Razorpay); real Razorpay Checkout payment (comes with the mobile wiring, 2.9); concurrent orders (PGlite is single-session); Docker PG 17 (optional).
+**Dev:** `test-orders-dev.ps1` passed on 13 Nov (hold, Razorpay TEST order, ISSUED, DUPLICATE, 401). Needed the dev test device (`DEV_ONLY_2_6_demo_attendee_device.sql`).
+
+**Not yet tested:** a real Razorpay Checkout payment (comes with the mobile wiring, 2.9); concurrent orders (PGlite is single-session); Docker PG 17 (optional).
 
 **Known gaps and decisions (2.6):**
 - The dev test simulates the signed webhook. It does not pay with a real test card. A real test payment is checked in 2.9 with Razorpay Checkout on the phone.
@@ -444,3 +448,106 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Ticket price is the ticket type's face value. Fees and GST are not handled in 2.6.
 - The first dev run failed with `CANNOT_TRANSACT`. Cause: the test sign-in had no device link, so `session_can_transact()` correctly refused it. Fix: the dev device fixture and `device_key_id` at sign-in. The gate itself was not changed.
 
+## Phase 2.7 — Tickets, rotating QR and gate scan
+
+**Built (branch `feature/phase2-7-tickets`, on top of 2.6):**
+- `supabase/migrations/006_tickets.sql`:
+  - `issue_qr_nonce()`: stores a QR nonce (hash only) for a ticket the caller owns and that is active. Lives 10 seconds.
+  - `scan_ticket()`: one transaction. Locks the ticket row, then decides and records the result in `redemptions`. Results: VALID, ALREADY_USED, EXPIRED, WRONG_EVENT, INVALID.
+  - A retry with the same scan key returns the same answer and adds no row. A key used for another ticket is refused (`KEY_REUSED`).
+  - A scanner that is not active for the event is refused (`SCANNER_NOT_FOUND`).
+  - Service role only.
+- `services/api/supabase/functions/_shared/qr.ts`: QR token `TT1.<ticketId>.<exp>.<nonce>.<sig>`. `sig` is an HMAC-SHA256 (`QR_HMAC_KEY`), cut to 32 hex characters. The phone never sees the key.
+- `services/api/supabase/functions/tickets/index.ts`: `mine` (my tickets) and `qr` (a new QR, 10 seconds). `qr` needs the full gate (`session_can_transact`).
+- `services/api/supabase/functions/scanner_verify/index.ts`: the gate scan. Caller must pass the full gate and be the organiser of the event. A bad signature is INVALID without touching the database. Scanner id is optional (the event's first active scanner is used).
+- **Replaces** the old placeholder `services/api/supabase/functions/scanner/verify/index.ts`. That placeholder used snake_case columns that do not exist in this schema, was not atomic, and returned a `REVOKED` result that is not in the spec. Its folder is removed in the guide.
+- `supabase/APPLY_2_7_TO_SUPABASE_DEV.sql`: 006 with a dev header. Dev only.
+- `supabase/DEV_ONLY_2_6_demo_attendee_device.sql`: now covers the organiser too (`dev-demo-organiser-device`). Re-run it on dev.
+- `scripts/set-qr-secret-dev.ps1`: makes a random `QR_HMAC_KEY` and sets it on dev. The key is never printed.
+- `scripts/test-gate-dev.ps1`: end-to-end dev check: an old QR (EXPIRED), a fresh QR (VALID), the same QR again (ALREADY_USED), a changed QR (INVALID).
+- `scripts/deploy-functions.ps1`: now deploys `tickets` and `scanner_verify` too. `supabase/config.toml`: both added.
+
+**Tests:**
+- Database (PGlite, PG 18): `supabase/tests/006_tickets.test.sql`, T44 to T56, one transaction, ends with ROLLBACK. Chain: stubs, 001, 002, 002b, 004, 003, accounts, 003, 005, 006, then the tests. All pass.
+- Mutation check (`mutate_tickets.mjs`): 8 of 8 caught (no expiry check, no idempotency, no event check, no used check, no scanner check, no owner check, no key-reuse check, no nonce match).
+- Deno: 82 pass (76 before, plus 6 in `qr_test.ts`). `deno check` exit 0 on `auth`, `devices`, `events`, `orders`, `razorpay_webhook`, `tickets`, `scanner_verify`.
+
+**Not yet tested:** on the real dev project; real concurrency (two scans at the same millisecond). The row lock is what makes that safe, but PGlite is single-session, so the lock itself is not proven by a test. Phone camera scanning (2.9).
+
+**Known gaps and decisions (2.7):**
+- **QR TTL is 10 seconds (PRD §6.4).** Network time eats part of it. If a scan reaches the server after 10 seconds, it returns EXPIRED. Decision still open: keep 10 s, or allow a small grace. The PRD says 10 s.
+- Only the event's organiser can scan. Gate staff assignment comes later (Phase 4).
+- QR issue is not rate-limited yet. Each QR adds one row to `qr_credentials`. Old rows are not purged yet.
+- No offline scanning. The scan needs the network.
+- The scanner check uses the first active scanner when `scanner_id` is not sent. Fine for the demo; the phone app will send its own id (2.9).
+
+## Phase 2.8 — Resale with a price cap, and group tickets (FR-027)
+
+**Built (branch `feature/phase2-8-resale-group`, on top of 2.7):**
+- `supabase/migrations/007_resale_group.sql` (service role only):
+  - Event resale policy: `resaleCapBps` (default 11000 = 110%), `resaleTransferLimit` (default 2), `resaleCutoffAt` (default: event start). Ticket types: `groupEligible` (default false).
+  - Cap: `resale_max_price_minor()` = floor(face × capBps / 10000). Checked at listing (`resale_list`) and again at payment (`apply_resale_captured`).
+  - Listing: `resale_list`, `resale_cancel`. A listed ticket is `LISTED` and gets no QR (`issue_qr_nonce` needs `ISSUED_ACTIVE`). The gate also refuses it (`scan_ticket`).
+  - Purchase: `resale_begin_purchase` holds the listing for 15 minutes (one attempt at a time), `resale_record_provider_order` stores the Razorpay order, `apply_resale_captured` transfers the ticket (owner changes, `transferCount` +1, old QR credentials revoked, `transfers` row), `apply_resale_failed` releases the hold.
+  - A payment whose hold was replaced, whose amount is wrong, or which arrives after cutoff is marked `refund_needed`. It never transfers.
+  - Group: a ticket of a `groupEligible` type goes to the manager's bucket (`ISSUED_UNASSIGNED_GROUP`) by trigger. No QR there.
+  - `group_allocate` (invite by email; only the hash of the claim code is stored), `group_claim` (once; the invited, verified email only; zero-price transfer; `transferCount` unchanged), `group_revoke` (before claim), `group_keep_for_self` (one bucket ticket per manager).
+- `services/api/supabase/functions/resale/index.ts`: `listings`, `list`, `cancel`, `buy`. `buy` returns a Razorpay order for the hold.
+- `services/api/supabase/functions/groups/index.ts`: `mine`, `allocate` (emails the claim code; if the email fails the invite is cancelled), `claim`, `revoke`, `keep`.
+- `services/api/supabase/functions/razorpay_webhook/index.ts`: routes a payment to the resale functions when its Razorpay order belongs to a resale attempt. Ticket orders are unchanged.
+- `_shared/resale.ts` (cap maths, price check, rupee format), `_shared/group.ts` (claim code), `_shared/outcome.ts` (result code to HTTP error).
+- `supabase/APPLY_2_8_TO_SUPABASE_DEV.sql`: 007 with a dev header. Dev only.
+- `supabase/DEV_ONLY_2_8_resale_group_fixture.sql`: two fixed test tickets for the demo attendee (one General for resale, one Corporate Bulk for the bucket). Dev only. Re-runnable.
+- `scripts/test-resale-dev.ps1`: 7 dev checks (above-cap refused, at-cap accepted, invite, claim, second claim refused, manager has no QR, cleanup).
+- `scripts/deploy-functions.ps1` and `supabase/config.toml`: `resale` and `groups` added.
+
+**Tests:**
+- Database (PGlite): `supabase/tests/007_resale_group.test.sql`, T57 to T80, one transaction, ends with ROLLBACK. Chain: stubs, 001, 002, 002b, 004, 003, accounts, 003, 005, 006, 007, then the tests. All pass.
+- Mutation check (`mutate_resale.mjs`): 12 of 12 caught (no price cap, no transfer limit, no cutoff, no amount check, no QR revoke, no payment dedupe, claim not single-use, no email match, no bucket trigger, no self-invite check, no hold check, no keep limit).
+- Fixture (`DEV_ONLY_2_8`): applies, runs twice, statuses correct.
+- Deno: 93 pass (82 before, plus 11 in `resale_test.ts`, `group_test.ts`, `outcome_test.ts`). `deno check` exit 0 on `resale`, `groups`, `razorpay_webhook`.
+
+**Not yet tested:** on the dev project (`test-resale-dev.ps1`). The payment-to-transfer path needs a real Razorpay Test checkout. PGlite covers the database side of it.
+
+**Decisions taken in 2.8 (please confirm):**
+- Default cap is 110% (PRD example), transfer limit 2, cutoff = event start. The organiser sets these per event later (web resale policy screen is still mock).
+- The transfer count goes up on resale only. A group claim is zero-price and does not count.
+- Only the Corporate Bulk type (`groupEligible`) goes to the bucket. A single buyer of that type must call `keep` to get a QR. The mobile app must show this in 2.9.
+- Invite code is valid for 7 days. Dev mode also returns the code in the response (`DEMO_MODE` only) so the dev test can claim without a mailbox.
+
+**Known gaps (2.8):**
+- **No resale fee yet** (PRD: 1 to 3%). No seller settlement ledger for resale. Needs a decision on the fee rate.
+- **Refunds for `refund_needed` payments are manual.** No automatic Razorpay refund call yet.
+- A Razorpay order that fails to create leaves the hold for up to 15 minutes. Then it is released on the next attempt.
+- Resale and group actions are not rate-limited, and do not write `audit_logs` yet (append-only audit is in 2.10).
+- A buyer who pays for a listing and then gets `payment.failed` on the same Razorpay order, then succeeds on a retry, is refused and flagged `refund_needed`. Safe, but it needs a human to refund.
+- Group order quantity: each purchase request is capped at 10 tickets (`reserve_inventory`). Corporate teams buy in several requests until the per-account limit (set on the ticket type).
+- Mobile wiring (2.9) and RLS tests (2.10) are not part of 2.8.
+
+## Phase 2.10 — RLS, grants, audit and security pass
+
+**Built (branch `feature/phase2-10-security`, on top of `main` after 2.8):**
+- `supabase/migrations/008_client_grants.sql`: clients (`anon`, `authenticated`) lose TRUNCATE on all public tables, and for future tables. TRUNCATE skips RLS, so it is blocked at grant level. Row writes were already blocked by RLS.
+- `supabase/migrations/009_audit_append_only.sql`:
+  - Status changes on `tickets`, `orders`, `resale_listings`, `group_tickets` write one `audit_logs` row (`STATUS_CHANGED`, outcome `OLD -> NEW`). Owner changes on `tickets` write `OWNER_CHANGED`. Written by trigger, so edge functions do not need to remember it. Closes the "audit in 2.10" gap noted in 2.8.
+  - `audit_logs` is append-only: UPDATE, DELETE and TRUNCATE are refused for every role, service role included.
+- `supabase/APPLY_2_10_TO_SUPABASE_DEV.sql`: 008 + 009 with a dev header. Dev only. Safe to run twice.
+- `supabase/tests/010_rls_and_grants.test.sql`: T82 to T90, one transaction, ends with ROLLBACK.
+  - T82: buyers see only their own orders and tickets. T83: draft events are hidden from anon and attendees; published events are public. T84: resale listings, resale payments, group tickets and QR credentials are closed to clients. T85: no client can run any 2.8 function. T86: an unverified account is refused for list, buy, invite, keep and claim. T87: RLS is on for every public table. T88: the only write policy is `profiles_self_update`; no client can delete or truncate. T89: status and owner changes are audited, and a no-op update writes nothing. T90: `audit_logs` refuses UPDATE, DELETE and TRUNCATE.
+
+**Tests:**
+- Database (PGlite): full chain 001 to 007, then 008, 009, 010. All pass. Earlier suites re-run on the same code: 002, 002b (`run_apply23`), 004 inventory, 005 orders, 006 tickets. All pass.
+- Mutation check (`mutate_rls.mjs`): 14 of 14 caught. Covers drafts visible, public read on listings and payments, owner policy opened, `can_transact` removed from list and claim, 2.8 functions granted to anon, TRUNCATE grant returned, extra write policy, RLS off, audit trigger on INSERT only, audit DELETE allowed, audit TRUNCATE trigger removed, status change not audited.
+- Deno: 93 pass, 0 fail (unchanged).
+- Gitleaks v8.24.2 over the repo: 2 hits, both test dummy values (`qr_test.ts` test key string and `devices_test.ts` generated test public key). No real secret found. Not added to an ignore list.
+- Client code: no `service_role` or secret key in `apps/`. Mobile uses the anon key only.
+
+**Not yet verified on dev:** the 008 and 009 SQL (`APPLY_2_10_TO_SUPABASE_DEV.sql`). Read-only checks are in the guide.
+
+**Known gaps (2.10):**
+- Audit rows have `actorId` NULL. The database does not know who made a change through the service role. Add the actor when the functions pass it in.
+- Audit covers status and owner changes only. Inserts (a new listing, a new order) are not audited.
+- No retention or purge path for `audit_logs`. Append-only also blocks the service role. A reviewed purge step is needed later.
+- The 2.3 accepted gap is unchanged: reused refresh token does not revoke the family on dev (reuse checks 7 and 8 fail). 2.10 does not claim it is fixed.
+- `apps/mobile/src/auth/session.ts` has a hardcoded demo OTP (`123456`) and demo emails `@truticket.test`. Dev uses `@example.com` and a `DEMO_OTP_CODE` secret. Replace in 2.9 (mobile wiring) and ensure the demo path is only reachable with `DEMO_MODE=true`.
+- The OTP per-email limit (30 guesses per 15 min) is in `otp_flow.ts`, not yet in `limits.ts`.
