@@ -1,0 +1,232 @@
+{
+  "id": "tt-07-outbox-sender",
+  "name": "TruTicket 07 - Outbox sender (email)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/notification_outbox?status=eq.PENDING&attempts=lt.5&select=id,kind,recipientId,payload,attempts&order=createdAt.asc&limit=20",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Read pending outbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/profiles?id=eq.{{ $('Read pending outbox').item.json.recipientId }}&select=email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Look up email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst row = $('Read pending outbox').item.json;\nconst to = ($json && $json[0] && $json[0].email) || '';\nconst p = row.payload || {};\nconst T = {\n  PAYMENT_CONFIRMED: ['Your TruTicket order is confirmed', 'Order ' + (p.order_id || '') + ' is confirmed. Open the TruTicket app to see your tickets.'],\n  EVENT_PUBLISHED: ['Your event is live on TruTicket', '\"' + (p.title || 'Your event') + '\" is published and on sale.'],\n  RESALE_OFFER: ['Your ticket is listed for resale', 'Your listing is live at ' + (p.ask_minor != null ? 'Rs ' + (p.ask_minor / 100).toFixed(2) : 'the price you set') + '. The resale price cap applies.'],\n  QR_EXPIRY_WARNING: ['Your event is coming up', 'Your event starts at ' + (p.start_at || 'soon') + '. Open the app before you arrive. Your QR refreshes each time you show it.'],\n  TICKET_REDEEMED: ['You are in', 'Your ticket for \"' + (p.title || 'the event') + '\" was scanned at ' + (p.redeemed_at || 'the gate') + '. Enjoy the event.'],\n  PAYMENT_CLEANUP: ['Your TruTicket payment is not complete', 'Order ' + (p.order_id || '') + ' is still waiting for payment. Start again in the app if you still want the tickets.'],\n};\nconst t = T[row.kind] || ['TruTicket update', 'You have a new update in the TruTicket app.'];\nconst esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\nconst html = '<p>' + esc(t[1]) + '</p><p>TruTicket</p>';\nreturn [{ json: {\n  outboxId: row.id,\n  attempts: row.attempts || 0,\n  brevo: {\n    sender: { name: 'TruTicket', email: $env.BREVO_SENDER_EMAIL },\n    to: [{ email: to }],\n    subject: t[0],\n    htmlContent: html,\n  },\n} }];\n"
+      },
+      "name": "Compose email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.brevo.com/v3/smtp/email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api-key",
+              "value": "={{ $env.BREVO_API_KEY }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.brevo }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Send via Brevo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/notification_outbox?id=eq.{{ $('Compose email').item.json.outboxId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { status: $json.messageId ? 'SENT' : 'FAILED', attempts: $('Compose email').item.json.attempts + 1, sentAt: $json.messageId ? new Date().toISOString() : null, lastError: $json.messageId ? null : String($json.message || 'send failed').slice(0, 200) } }}",
+        "options": {}
+      },
+      "name": "Mark SENT or FAILED",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Read pending outbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read pending outbox": {
+      "main": [
+        [
+          {
+            "node": "Look up email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Look up email": {
+      "main": [
+        [
+          {
+            "node": "Compose email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose email": {
+      "main": [
+        [
+          {
+            "node": "Send via Brevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via Brevo": {
+      "main": [
+        [
+          {
+            "node": "Mark SENT or FAILED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Sender. Sends every PENDING notification_outbox row (max 5 attempts). A row with no email address fails and is retried until attempts reach 5."
+  },
+  "tags": [],
+  "pinData": {}
+}

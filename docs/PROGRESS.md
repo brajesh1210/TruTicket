@@ -552,4 +552,74 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - `apps/mobile/src/auth/session.ts` has a hardcoded demo OTP (`123456`) and demo emails `@truticket.test`. Dev uses `@example.com` and a `DEMO_OTP_CODE` secret. Replace in 2.9 (mobile wiring) and ensure the demo path is only reachable with `DEMO_MODE=true`.
 - The OTP per-email limit (30 guesses per 15 min) is in `otp_flow.ts`, not yet in `limits.ts`.
 
+## Phase 3 — Blockchain (Polygon Amoy, testnet)
 
+**Built (branch `feature/phase3-chain`):**
+- `contracts/contracts/TruTicket.sol`: OpenZeppelin 5.0.2 rewrite (the old v4 draft is gone). Roles: organiser, marketplace (backend), verifier (gate), admin. Resale cap 100%–200% of face value, transfer limit 1–10, cutoff per event, listing expiry 7 days. Direct wallet-to-wallet transfers and burns are refused. Group allocation is a zero-price move that does not count as a transfer. Redeem is one-way; a redeemed or listed ticket cannot be redeemed twice, resold or revoked.
+- `listForResaleFor`: the backend lists on behalf of the on-chain owner. Users have custodial wallets and do not sign, so they never need MATIC.
+- `contracts/test/TruTicket.test.js`: 34 Hardhat tests (mint, cap, resale, cutoff, transfer limit, re-check after policy change, allocation, redeem, pause, roles).
+- `contracts/scripts/deploy.js` and `scripts/deploy-amoy.ps1`: deploy to Amoy. The private key is typed at a hidden prompt, kept in memory for that run, and never saved.
+- `services/api/supabase/functions/_shared/chain.ts` (+ `chain_test.ts`, 12 tests): event key (keccak256 of the event UUID), custodial wallet derivation (HMAC of the master secret per user), policy arguments.
+- `services/api/supabase/functions/_shared/truticket_abi.ts`: generated from the compiled artifact. Regenerate after any contract change.
+- `services/api/supabase/functions/chain/index.ts`: internal function (needs `x-internal-secret`). Actions: `setup_event`, `mint`, `list`, `cancel`, `settle`, `allocate`, `redeem`. Mint claims the ticket row first (`tokenId` = `pending`), so two retries cannot mint twice. A chain error never changes DB ownership.
+- `scanner_verify`: after a VALID scan, a best-effort call marks the NFT redeemed on chain. A chain failure does not change the gate result.
+- `scripts/set-chain-secrets-dev.ps1`: sets the chain secrets on DEV only. Generates the master and internal secrets. Refuses to run twice (marker file).
+
+**Tests:**
+- Hardhat: 34 pass.
+- Mutation check (`mutate_contract.py`): 13 of 13 caught (cap on list and settle, transfer limit, cutoff, expiry, direct transfer, redeem guards, allocation counts as transfer, cancel by others, roles, pause).
+- Deno unit tests: 105 pass, 0 fail (93 before + 12 chain).
+- Chain smoke on a local Hardhat node, using the same helpers as the Edge Function: 12 of 12 checks pass (policy, mint owner, list above cap refused, list at cap, settle owner, transfer count, allocate, redeem, double redeem refused, list after redeem refused).
+
+**Not yet done (needs the user):**
+- Amoy deploy (needs the test wallet and test MATIC from the faucet). Run `scripts/deploy-amoy.ps1`.
+- PolygonScan verification (optional).
+- `scripts/set-chain-secrets-dev.ps1` and `deploy-functions.ps1` on DEV.
+- Mint on purchase, resale and group transfers: triggered by n8n (Phase 5). The n8n workflows are not finished yet.
+
+**Known gaps (Phase 3):**
+- Reconciliation: if a chain call fails after a DB change (e.g. redeem after a VALID scan), the chain and DB can disagree. n8n needs a retry job for tickets with `tokenId` set and no on-chain redeem.
+- `CHAIN_MASTER_SECRET` loss or change makes every custodial wallet unreachable. Back it up once, outside the repo.
+- Backend is the only signer. A compromised operator key can move any listed ticket. Testnet only; a hardware or multisig operator is needed before launch.
+- Amoy RPC is public. Rate limits may slow mint under load.
+- No gas budget or retry policy beyond one attempt per call.
+
+## Phase 5 — n8n notifications and chain mint (Docker, polling, no public URL)
+
+**Built (branch `feature/phase5-n8n`):**
+- `supabase/migrations/011_notification_outbox.sql`: `notification_outbox` table. One row per notification. `dedupeKey` is unique, so a repeat insert is ignored. RLS is on and clients have no privileges; service role only. Dev only so far.
+- `supabase/tests/011_notification_outbox.test.sql`: T91 to T95 (RLS and grants, dedupe, kind and status checks, valid update, profile delete cascades).
+- `supabase/APPLY_PHASE5_OUTBOX_TO_SUPABASE_DEV.sql`: 011 with a dev header. Safe to run twice.
+- `n8n/workflows/` (8 files, replace the two invalid drafts):
+  - `tt-01-payment-confirmation`: order TICKET_ISSUED -> outbox PAYMENT_CONFIRMED to the buyer. (Fixed 13 Nov: the query used `ISSUED`, which is not an order status.)
+  - `tt-02-event-published`: event published -> outbox EVENT_PUBLISHED to the organiser.
+  - `tt-03-resale-listed`: resale listing ACTIVE -> outbox RESALE_OFFER to the seller. A real waitlist offer needs a waitlist table, which does not exist yet.
+  - `tt-04-ticket-reminder`: ISSUED_ACTIVE ticket, event within 24 h -> outbox QR_EXPIRY_WARNING (a reminder; the QR lasts 10 s, so the name is kept only for the plan).
+  - `tt-05-ticket-redeemed`: VALID redemption -> outbox TICKET_REDEEMED to the holder.
+  - `tt-06-payment-cleanup`: PAYMENT_PENDING for 30 min or more -> outbox PAYMENT_CLEANUP to the buyer. Does NOT release seats (holds expire by time only).
+  - `tt-07-outbox-sender`: sends PENDING rows through Brevo (max 5 attempts), then marks SENT or FAILED.
+  - `tt-08-chain-mint`: ISSUED_ACTIVE tickets with no `tokenId` -> chain function `mint`.
+- Removed: the old `payment-confirmation.json` and `qr-expiry-warning.json` drafts (invalid node types).
+- `infra/docker-compose.yml`: ML service removed (ML excluded). n8n reads `infra/.env`. Basic-auth password is required, not `changeme`. No public URL: workflows poll every minute. Workflows mounted read-only at `/home/node/workflows`.
+- `infra/.env.example`: template. The real `infra/.env` is never committed.
+- `scripts/setup-n8n-dev.ps1`: checks infra/.env is DEV (refuses production), asks for the Brevo key and sender in hidden or plain prompts, makes an n8n password if missing, starts Docker n8n, imports the 8 workflows and activates them.
+
+**Tests:**
+- Database (PGlite): full chain 001 to 010, then 011. T91 to T95 pass.
+- Mutation check (`run_outbox.mjs`): 4 of 4 caught (dedupe not unique, kind check removed, RLS off, client grants not revoked).
+- Code nodes (`run_code_nodes.mjs`): tt-01 row shape and empty-buyer skip; tt-07 email for all 7 kinds with real payload shapes; organiser title is HTML-escaped in the email. Pass. (Fixed 13 Nov: the email body injected the event title unescaped.)
+- Workflow JSON (`validate.py`): 8 of 8 pass. Checks: valid JSON, one trigger, node types and typeVersions from n8n-nodes-base 2.15.1, every connection points at a real node, every node reachable, expressions start with `=`.
+- NOT verified: a live n8n run. The sandbox could not install n8n (native build and network timeouts). Import and run on the user PC is the test.
+
+**Not done / decisions needed:**
+- `group-invite` (PLAN Phase 5 item 8) is NOT a workflow. The `groups` function already sends the invite email (2.8). A second email would duplicate it.
+- Resale, group and redeem chain sync (list, settle, allocate) are not wired. Only mint is.
+- Retries: a failed email is retried up to 5 times, then stays FAILED. A failed mint is retried every minute.
+- Email send: Brevo endpoint `https://api.brevo.com/v3/smtp/email` with `api-key` header. Confirm on developers.brevo.com before the demo. The Brevo key in earlier chat must be rotated.
+- Event alert goes to the organiser only. No subscriber list exists.
+
+**Known gaps (Phase 5):**
+- Polling delays: up to about 1 minute per step (mint, then email).
+- The producers read the last day only. Rows older than a day are not picked up after an n8n outage longer than a day.
+- Outbox rows have no cleanup path (keep for audit; purge later).
+- Email recipient with no profile email is retried 5 times then FAILED.
