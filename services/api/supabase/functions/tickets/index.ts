@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
     if (body.action === "mine") {
       const { data, error } = await admin
         .from("tickets")
-        .select("id, status, faceValueMinor, events(title, venue, startAt), ticket_types(name)")
+        .select("id, status, faceValueMinor, events(id, title, venue, startAt), ticket_types(id, name)")
         .eq("currentOwnerId", buyer.userId)
         .order("createdAt", { ascending: false });
       if (error) throw error;

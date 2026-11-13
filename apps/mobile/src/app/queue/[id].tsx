@@ -3,8 +3,8 @@ import { StyleSheet, Text, View } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
-import { getEvent } from "../../mock/events";
-import { colors, fontSize, fontWeight, radius, space } from "../../theme";
+import { useEvent } from "../../services/events";
+import { colors, fontSize, fontWeight, space } from "../../theme";
 
 /**
  * FairQueue (mock). In Phase 2 the server issues the queue position and admission
@@ -16,7 +16,7 @@ const ADMIT_AFTER_SECONDS = 8;
 
 export default function FairQueue() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const event = getEvent(id);
+  const { data: event } = useEvent(id);
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {

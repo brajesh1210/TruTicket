@@ -3,10 +3,11 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { EventCard } from "../../components/EventCard";
 import { Screen } from "../../components/Screen";
-import { MOCK_EVENTS, MockEvent } from "../../mock/events";
+import { useEvents } from "../../services/events";
+import type { AppEvent } from "../../services/types";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
-type Category = MockEvent["category"];
+type Category = AppEvent["category"];
 const CATEGORIES: { name: Category; hint: string }[] = [
   { name: "Concerts", hint: "Live music" },
   { name: "Sports", hint: "Matches and leagues" },
@@ -17,7 +18,9 @@ const CATEGORIES: { name: Category; hint: string }[] = [
 /** Categories (mock). Tap a tile to see its events. */
 export default function Categories() {
   const [selected, setSelected] = useState<Category>("Concerts");
-  const list = MOCK_EVENTS.filter((e) => e.category === selected);
+  const all = useEvents();
+  const pool = all.data ?? [];
+  const list = pool.filter((e) => e.category === selected);
 
   return (
     <Screen edges={["top"]}>
@@ -25,7 +28,7 @@ export default function Categories() {
 
       <View style={styles.grid}>
         {CATEGORIES.map((c) => {
-          const count = MOCK_EVENTS.filter((e) => e.category === c.name).length;
+          const count = pool.filter((e) => e.category === c.name).length;
           const active = c.name === selected;
           return (
             <Pressable

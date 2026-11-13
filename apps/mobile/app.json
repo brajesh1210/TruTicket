@@ -38,6 +38,15 @@
             "backgroundColor": "#0B0B0B"
           }
         }
+      ],
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TruTicket uses the camera to scan entry QR codes at the gate.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
       ]
     ],
     "extra": {

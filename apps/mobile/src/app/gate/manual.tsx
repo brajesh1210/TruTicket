@@ -4,29 +4,37 @@ import { router } from "expo-router";
 import { Button } from "../../components/Button";
 import { Field } from "../../components/Field";
 import { Screen } from "../../components/Screen";
-import { manualLookup } from "../../mock/gate";
+import { GATE_EVENT_ID } from "../../services/config";
+import { messageOf } from "../../services/errors";
+import { scanToken } from "../../services/gate";
 import { colors, fontSize, fontWeight, space } from "../../theme";
 
 /**
- * Manual ticket lookup (PRD screen 26). Fallback when the attendee's phone screen is
- * damaged. Gate staff type the ticket ref and check the attendee's ID.
+ * Paste the QR text instead of scanning it. Used when the camera cannot read the code, and
+ * for the demo path (the attendee's ticket screen shows the text in demo builds).
+ * The server checks the text exactly like a camera scan.
  */
 export default function Manual() {
-  const [ref, setRef] = useState("");
+  const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  function lookup() {
-    const clean = ref.trim();
+  async function check() {
+    const clean = text.trim();
     if (!clean) {
-      setError("Enter a ticket ref, for example tkt-1001.");
+      setError("Paste the QR text first.");
       return;
     }
     setError(null);
-    const r = manualLookup(clean, Math.floor(Date.now() / 1000));
-    router.push({
-      pathname: "/gate/result",
-      params: { status: r.status, detail: r.detail, ticketId: r.ticketId ?? "" },
-    });
+    setBusy(true);
+    try {
+      const r = await scanToken(GATE_EVENT_ID, clean);
+      router.replace({ pathname: "/gate/result", params: { status: r.status, detail: r.detail } });
+    } catch (e) {
+      setError(messageOf(e, "Could not check this code. Try again."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -34,27 +42,26 @@ export default function Manual() {
       <Text style={styles.back} onPress={() => router.back()} accessibilityRole="button">
         ← Back
       </Text>
-      <Text style={styles.heading}>Manual lookup</Text>
+      <Text style={styles.heading}>Paste QR code</Text>
       <Text style={styles.body}>
-        Use this only when the phone screen cannot be scanned. Ask for the attendee's ID and match the name on it before
-        you admit.
+        Use this when the camera cannot read the attendee's code. Check the attendee's ID and match the name before you admit.
       </Text>
 
       <Field
-        label="Ticket ref"
-        placeholder="tkt-1001"
+        label="QR text"
+        placeholder="TT1.…"
         autoCapitalize="none"
         autoCorrect={false}
-        value={ref}
-        onChangeText={setRef}
+        value={text}
+        onChangeText={setText}
         error={error}
-        onSubmitEditing={lookup}
-        returnKeyType="search"
-        testID="manual-ref"
+        onSubmitEditing={check}
+        returnKeyType="done"
+        testID="manual-token"
       />
-      <Text style={styles.hint}>Demo refs: tkt-1001 (valid), tkt-0900 (wrong event)</Text>
+      <Text style={styles.hint}>In the demo build, the ticket screen shows this text. It expires in 10 seconds, so paste it quickly.</Text>
 
-      <Button label="Look up" onPress={lookup} style={{ marginTop: space.md }} testID="manual-lookup" />
+      <Button label="Check" onPress={check} loading={busy} style={{ marginTop: space.md }} testID="manual-check" />
     </Screen>
   );
 }
@@ -63,5 +70,5 @@ const styles = StyleSheet.create({
   back: { color: colors.brand.cyan, fontSize: fontSize.md, paddingVertical: space.md },
   heading: { color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.bold },
   body: { color: colors.text.muted, fontSize: fontSize.md, lineHeight: 22, marginTop: space.xs, marginBottom: space.lg },
-  hint: { color: colors.text.muted, fontSize: fontSize.xs, marginTop: space.xs },
+  hint: { color: colors.text.muted, fontSize: fontSize.xs, marginTop: space.xs, lineHeight: 18 },
 });

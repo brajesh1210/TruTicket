@@ -2,10 +2,10 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { colors, fontSize, fontWeight, radius, space } from "../theme";
-import type { MockEvent } from "../mock/events";
+import type { AppEvent } from "../services/types";
 
 type Props = {
-  event: MockEvent;
+  event: AppEvent;
   variant?: "wide" | "compact";
   onPress?: () => void;
 };

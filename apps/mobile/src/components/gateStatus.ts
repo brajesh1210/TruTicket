@@ -1,5 +1,5 @@
 import { colors } from "../theme";
-import type { ScanStatus } from "../mock/gate";
+import type { ScanStatus } from "../services/gate";
 
 /** Full-screen colour and icon for each gate result (PRD screen 24). */
 export const GATE_TONE: Record<ScanStatus, { bg: string; fg: string; icon: string }> = {

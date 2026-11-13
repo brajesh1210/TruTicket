@@ -1,51 +1,78 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { router, useFocusEffect } from "expo-router";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
-import { getEvent } from "../../mock/events";
-import { evaluateScan, GATE_EVENT_ID, mockPayload } from "../../mock/gate";
+import { GATE_EVENT_ID } from "../../services/config";
+import { useEvent } from "../../services/events";
+import { messageOf } from "../../services/errors";
+import { recordOffline, scanToken } from "../../services/gate";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
-const now = () => Math.floor(Date.now() / 1000);
-
 /**
- * Gate scanner, camera view (PRD screen 23). Gate staff only (demo entry from Profile).
- * This build has no camera module yet. Live camera scanning needs expo-camera, which
- * needs a new EAS dev build. Until then, the sample buttons feed the same scan logic.
+ * Gate scanner (PRD screen 23). Live camera scan of the attendee's QR. Each scan is checked by
+ * the server (`scanner_verify`), which marks the ticket used on the first valid scan.
+ * Gate staff only: the signed-in account must be the organiser of this event.
  */
 export default function GateScanner() {
+  const { data: event } = useEvent(GATE_EVENT_ID || undefined);
+  const [permission, requestPermission] = useCameraPermissions();
   const [offline, setOffline] = useState(false);
   const [last, setLast] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const lock = useRef(false);
   const sweep = useRef(new Animated.Value(0)).current;
-  const event = getEvent(GATE_EVENT_ID);
 
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(sweep, { toValue: 1, duration: 1600, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(sweep, { toValue: 0, duration: 1600, easing: Easing.linear, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [sweep]);
+  // Only one camera preview may run at a time. The camera stops when this screen loses focus.
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      lock.current = false;
+      setChecking(false);
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(sweep, { toValue: 1, duration: 1600, easing: Easing.linear, useNativeDriver: true }),
+          Animated.timing(sweep, { toValue: 0, duration: 1600, easing: Easing.linear, useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+      return () => {
+        setFocused(false);
+        loop.stop();
+      };
+    }, [sweep]),
+  );
 
-  function scan(label: string, payload: string) {
-    const r = evaluateScan(payload, now(), { offline });
-    setLast(label);
-    router.push({
-      pathname: "/gate/result",
-      params: { status: r.status, detail: r.detail, ticketId: r.ticketId ?? "" },
-    });
+  async function onScanned(data: string) {
+    if (lock.current) return;
+    lock.current = true;
+    setChecking(true);
+    setLast(data.slice(0, 16) + "…");
+
+    if (offline) {
+      const r = recordOffline();
+      router.push({ pathname: "/gate/result", params: { status: r.status, detail: r.detail } });
+      return;
+    }
+    try {
+      const r = await scanToken(GATE_EVENT_ID, data);
+      router.push({ pathname: "/gate/result", params: { status: r.status, detail: r.detail } });
+    } catch (e) {
+      // Server refused the check (not the organiser, scanner off, network). Show the reason.
+      const detail = messageOf(e, "Could not check this code. Try again.");
+      router.push({ pathname: "/gate/result", params: { status: "INVALID", detail } });
+    }
   }
 
-  const samples: { label: string; run: () => void }[] = [
-    { label: "Valid QR · tkt-1001", run: () => scan("Valid QR", mockPayload("tkt-1001", now())) },
-    { label: "Stale QR · 30 s old", run: () => scan("Stale QR", mockPayload("tkt-1001", now(), 3)) },
-    { label: "Wrong event · tkt-0900", run: () => scan("Wrong event", mockPayload("tkt-0900", now())) },
-    { label: "Junk code", run: () => scan("Junk", "hello") },
-  ];
+  if (!GATE_EVENT_ID) {
+    return (
+      <Screen>
+        <Text style={styles.note}>The gate event is not set. Add EXPO_PUBLIC_GATE_EVENT_ID to the build settings.</Text>
+      </Screen>
+    );
+  }
 
   return (
     <Screen edges={["top", "bottom"]}>
@@ -66,6 +93,14 @@ export default function GateScanner() {
 
       <View style={styles.viewWrap}>
         <View style={styles.viewfinder}>
+          {focused && permission?.granted ? (
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+              onBarcodeScanned={(res) => onScanned(res.data)}
+            />
+          ) : null}
           <View style={[styles.corner, styles.tl]} />
           <View style={[styles.corner, styles.tr]} />
           <View style={[styles.corner, styles.bl]} />
@@ -75,38 +110,29 @@ export default function GateScanner() {
               styles.scanline,
               {
                 transform: [
-                  {
-                    translateY: sweep.interpolate({ inputRange: [0, 1], outputRange: [0, 236] }),
-                  },
+                  { translateY: sweep.interpolate({ inputRange: [0, 1], outputRange: [0, 236] }) },
                 ],
               },
             ]}
           />
-          <Text style={styles.hint}>Point at the attendee's QR</Text>
+          {!permission?.granted ? (
+            <View style={styles.permission}>
+              <Text style={styles.permText}>Camera access is needed to scan tickets.</Text>
+              <Button label="Allow camera" onPress={requestPermission} testID="allow-camera" />
+            </View>
+          ) : null}
         </View>
-        <Text style={styles.last}>{last ? `Last: ${last}` : "No scans yet this shift"}</Text>
+        <Text style={styles.last}>
+          {checking ? "Checking…" : last ? `Last scan: ${last}` : "No scans yet this shift"}
+        </Text>
       </View>
 
-      <Text style={styles.section}>Demo scans (no camera in this build)</Text>
-      <View style={styles.samples}>
-        {samples.map((s) => (
-          <Button
-            key={s.label}
-            label={s.label}
-            variant="secondary"
-            onPress={s.run}
-            style={styles.sampleBtn}
-            testID={`sample-${s.label}`}
-          />
-        ))}
-      </View>
       <Text style={styles.note}>
-        Scan the same valid QR twice to see ALREADY USED. Turn Offline on to see OFFLINE-UNVERIFIED.
+        Scan the attendee's QR. A ticket is admitted once. If the camera cannot read the code, paste its text instead.
       </Text>
-
       <View style={{ flex: 1 }} />
       <View style={styles.footer}>
-        <Button label="Manual lookup" variant="secondary" onPress={() => router.push("/gate/manual")} style={{ flex: 1 }} />
+        <Button label="Paste QR code" variant="secondary" onPress={() => router.push("/gate/manual")} style={{ flex: 1 }} testID="paste-qr" />
         <Button label="Activity log" variant="secondary" onPress={() => router.push("/gate/activity")} style={{ flex: 1 }} />
       </View>
       <Button label="Exit gate mode" variant="ghost" onPress={() => router.replace("/(tabs)")} />
@@ -115,6 +141,7 @@ export default function GateScanner() {
 }
 
 const CORNER = 36;
+
 const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: space.md },
   eventTitle: { color: colors.text.primary, fontSize: fontSize.lg, fontWeight: fontWeight.bold },
@@ -130,21 +157,18 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: "#000000",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "center",
     overflow: "hidden",
-    paddingBottom: space.md,
   },
   corner: { position: "absolute", width: CORNER, height: CORNER, borderColor: colors.brand.cyan },
   tl: { top: space.sm, left: space.sm, borderTopWidth: 4, borderLeftWidth: 4 },
   tr: { top: space.sm, right: space.sm, borderTopWidth: 4, borderRightWidth: 4 },
-  bl: { bottom: space.sm + 24, left: space.sm, borderBottomWidth: 4, borderLeftWidth: 4 },
-  br: { bottom: space.sm + 24, right: space.sm, borderBottomWidth: 4, borderRightWidth: 4 },
+  bl: { bottom: space.sm, left: space.sm, borderBottomWidth: 4, borderLeftWidth: 4 },
+  br: { bottom: space.sm, right: space.sm, borderBottomWidth: 4, borderRightWidth: 4 },
   scanline: { position: "absolute", top: 12, left: 16, right: 16, height: 2, backgroundColor: colors.brand.cyan },
-  hint: { color: colors.text.muted, fontSize: fontSize.xs },
+  permission: { padding: space.md, gap: space.sm, alignItems: "center" },
+  permText: { color: colors.text.secondary, fontSize: fontSize.sm, textAlign: "center" },
   last: { color: colors.text.secondary, fontSize: fontSize.sm },
-  section: { color: colors.text.primary, fontSize: fontSize.md, fontWeight: fontWeight.semibold, marginTop: space.md, marginBottom: space.sm },
-  samples: { gap: space.xs },
-  sampleBtn: { height: 46 },
   note: { color: colors.text.muted, fontSize: fontSize.xs, lineHeight: 18, marginTop: space.sm },
   footer: { flexDirection: "row", gap: space.sm, marginBottom: space.sm },
 });

@@ -4,12 +4,12 @@ import { router } from "expo-router";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
 import { GATE_TONE } from "../../components/gateStatus";
-import { getActivity, resetGateSession } from "../../mock/gate";
+import { getActivity, resetGateSession } from "../../services/gate";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Gate scan activity (PRD screen 25). Ticket refs and times only, no attendee names. */
+/** Gate scan activity (PRD screen 25). Results and times only, no attendee names. */
 export default function Activity() {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const items = getActivity();
@@ -42,7 +42,6 @@ export default function Activity() {
                   <View style={[styles.dot, { backgroundColor: tone.bg }]} />
                   <Text style={styles.status}>{r.status}</Text>
                 </View>
-                <Text style={styles.meta}>{r.ticketId ?? "No ticket ref"}</Text>
                 <Text style={styles.meta}>{r.detail}</Text>
               </View>
             </View>

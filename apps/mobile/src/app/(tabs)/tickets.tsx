@@ -1,35 +1,35 @@
-import React, { useCallback, useReducer, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { Screen } from "../../components/Screen";
-import { getEvent } from "../../mock/events";
-import { MOCK_TICKETS, MockTicket } from "../../mock/tickets";
+import { formatWhen } from "../../services/format";
+import { useMyTickets } from "../../services/tickets";
+import type { TicketStatusGroup } from "../../services/types";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
 const TABS = ["Upcoming", "Past", "Listed"] as const;
 type TabName = (typeof TABS)[number];
 
-const STATUS_FOR_TAB: Record<TabName, MockTicket["status"]> = {
+const STATUS_FOR_TAB: Record<TabName, TicketStatusGroup> = {
   Upcoming: "upcoming",
   Past: "past",
   Listed: "listed",
 };
 
 /**
- * My Tickets (mock). Real data comes from the tickets table in Phase 2.
- * Re-reads on focus, so a ticket listed on the sell screen moves to the Listed tab.
+ * My Tickets. Data from the `tickets` function. Re-reads on focus.
  */
 export default function Tickets() {
   const [tab, setTab] = useState<TabName>("Upcoming");
-  const [, refresh] = useReducer((n: number) => n + 1, 0);
+  const { tickets, error, loading, reload } = useMyTickets();
 
   useFocusEffect(
     useCallback(() => {
-      refresh();
-    }, []),
+      reload();
+    }, [reload]),
   );
 
-  const list = MOCK_TICKETS.filter((t) => t.status === STATUS_FOR_TAB[tab]);
+  const list = (tickets ?? []).filter((t) => t.status === STATUS_FOR_TAB[tab]);
 
   return (
     <Screen edges={["top"]}>
@@ -63,11 +63,16 @@ export default function Tickets() {
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {list.length === 0 ? (
+        {error ? (
+          <Text style={styles.empty} onPress={reload} accessibilityRole="button">
+            {error} Tap to retry.
+          </Text>
+        ) : loading && !tickets ? (
+          <Text style={styles.empty}>Loading your tickets…</Text>
+        ) : list.length === 0 ? (
           <Text style={styles.empty}>No {tab.toLowerCase()} tickets.</Text>
         ) : (
           list.map((t) => {
-            const event = getEvent(t.eventId);
             return (
               <Pressable
                 key={t.id}
@@ -75,10 +80,10 @@ export default function Tickets() {
                 style={[styles.card, { borderLeftColor: t.tierColor }]}
                 accessibilityRole="button"
               >
-                <Text style={styles.event}>{event?.title ?? "Event"}</Text>
-                <Text style={styles.meta}>{event?.when}</Text>
+                <Text style={styles.event}>{t.eventTitle}</Text>
+                <Text style={styles.meta}>{formatWhen(t.startAt)}</Text>
                 <Text style={styles.meta}>
-                  {t.quantity} × {t.tierName} · {t.seat}
+                  1 × {t.tierName} · ₹{t.faceValue.toLocaleString("en-IN")}
                 </Text>
                 <Text style={styles.open}>{t.status === "listed" ? "View listing" : "Show QR"} →</Text>
               </Pressable>

@@ -1,6 +1,6 @@
 # TruTicket — Progress Tracker
 
-_Last updated: 2026-11-12. Progress file is kept in the workspace and is NOT committed. Update it at every step._
+_Last updated: 2026-11-13. Progress file is kept in the workspace and is NOT committed. Update it at every step._
 
 Legend: [x] done · [~] scaffold/draft exists but not tested · [ ] not started
 
@@ -99,29 +99,28 @@ Remaining work to verify on the device: real Google login on the test phone. Don
 
 ## 4. Mobile App (React Native + Expo) — Ansh & Shivam (Frontend)
 
-Base:
-- [~] `apps/mobile` starter (App.tsx, SplashScreen, LoginScreen, ExploreScreen, MyTicketsScreen, ScannerScreen, services/auth.ts) — not yet run
-- [ ] `npm install` + `npx expo start` runs on Expo Go (Android)
-- [ ] Supabase client using **anon key only**
-- [ ] Navigation structure + theme/design tokens
-- [ ] Role switcher (attendee / gate staff)
+Base (Phase 2.9, 13 Nov):
+- [x] Expo SDK 57 app, API client in `src/services/` (one module per area: events, tickets, checkout, gate)
+- [x] Supabase Edge Functions with the anon key only (no service key in the app)
+- [x] Tokens in secure storage, refreshed with Supabase rotation
+- [ ] Navigation role switcher (attendee / gate staff): gate is a route from Profile, not a role switch
+- [x] Theme and design tokens
 
-Screens (from PRD, 34 total across mobile + web — mobile list):
-- [~] Splash
-- [~] Login / signup
-- [ ] Onboarding
-- [~] Explore (event list)
-- [ ] Event detail + ticket type selection
-- [ ] FairQueue waiting room (realtime position)
-- [ ] Checkout (Razorpay Test Mode)
-- [~] My tickets
-- [ ] Ticket detail with dynamic QR (auto refresh)
-- [ ] Resale: list ticket, price cap message
-- [ ] Transfer / group ticket assign
-- [~] Gate scanner (camera + verify call)
-- [ ] Profile + logout
+Screens (wired to the DEV backend in Phase 2.9):
+- [x] Splash / onboarding / login (Google native, email code, demo account on DEV)
+- [x] Explore and categories (real events from the `events` function)
+- [x] Event detail (real ticket types and seats left)
+- [~] FairQueue: still a timer (UI only, no server queue yet)
+- [x] Checkout: hold seats, Razorpay order, hosted payment page in the browser
+- [x] Success: waits for the webhook to issue tickets before showing "confirmed"
+- [x] My tickets (real)
+- [x] Ticket detail with the server QR (refreshes before the 10 s expiry)
+- [~] Resale: still mock (Phase 2.8 mobile wiring, next zip)
+- [~] Group tickets: still mock (Phase 2.8 mobile wiring, next zip)
+- [x] Gate scanner: live camera scan (expo-camera) and paste-QR path (demo), via `scanner_verify`
+- [x] Profile + logout (signs out and clears the saved tokens)
 - [ ] Wallet / ticket history
-- [ ] Error, empty and offline states
+- [~] Error, empty and offline states (loading and error text on the main screens; gate offline switch logs OFFLINE-UNVERIFIED)
 
 ---
 
@@ -302,7 +301,8 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 | 2.6 | Orders and Razorpay Test | Merged to `main`. Dev end-to-end passed (3 of 3). DB checks T35 to T43, 6 of 6 mutants caught. |
 | 2.7 | Tickets, rotating QR, gate scan | Branch `feature/phase2-7-tickets` (commit `08147f8`, pushed). DB checks T44 to T56 pass (PGlite), 8 of 8 mutants caught. Deno 82 pass. Dev gate test: 4 of 4 pass (13 Nov). |
 | 2.8 | Resale price cap, transfers, group tickets (FR-027) | Branch `feature/phase2-8-resale-group`, on top of 2.7. DB checks T57 to T80 pass (PGlite), 12 of 12 mutants caught. Deno 93 pass. Dev run pending (`test-resale-dev.ps1`). |
-| 2.9 to 2.10 | Mobile wiring (expo-camera build), RLS and auth tests | Not started. |
+| 2.9 | Mobile wiring (events, tickets, checkout, gate, email code, Google) | Zip 1 (13 Nov). Verified: typecheck, Android bundle, 12 mapper tests with 3 of 3 mutants caught, Deno 108 pass. Dev run pending (user). Resale and group screens still mock. |
+| 2.10 | RLS, grants, audit and security pass | Merged (see section below). |
 
 ## Phase 2.3 — Sessions and devices (single session, device binding, Android attestation)
 
@@ -551,6 +551,38 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - The 2.3 accepted gap is unchanged: reused refresh token does not revoke the family on dev (reuse checks 7 and 8 fail). 2.10 does not claim it is fixed.
 - `apps/mobile/src/auth/session.ts` has a hardcoded demo OTP (`123456`) and demo emails `@truticket.test`. Dev uses `@example.com` and a `DEMO_OTP_CODE` secret. Replace in 2.9 (mobile wiring) and ensure the demo path is only reachable with `DEMO_MODE=true`.
 - The OTP per-email limit (30 guesses per 15 min) is in `otp_flow.ts`, not yet in `limits.ts`.
+
+## Phase 2.9 — Mobile wiring (Zip 1, 13 Nov)
+
+Scope (PHASE2_PLAN §2.9, "as written"): replace the mock data behind `services/` with the API client, add `expo-camera`, and build a new EAS development client for the gate.
+
+Done in this zip:
+- [x] `src/services/` : `api.ts` (one HTTP client, errors as `ApiError`), `config.ts` (public values only), `errors.ts`, `types.ts`, `format.ts`, `mappers.ts` (pure API-row to app-shape mapping), `events.ts`, `tickets.ts`, `checkout.ts`, `gate.ts`
+- [x] `src/auth/tokens.ts`: sign-in tokens in `expo-secure-store`; refresh before expiry; sign out on `AUTH_INVALID` or `SESSION_REVOKED`
+- [x] `src/auth/session.ts`: Google ID token goes to `auth` (`action: google`); email code uses `otp_request` and `otp_verify`; demo account button sends the DEV demo code like any email
+- [x] Home, categories, event detail, queue title, checkout, success, my tickets, ticket QR, gate scanner, gate result, paste-QR, activity: wired
+- [x] Checkout: `reserve` (events) → `create` (orders) → browser opens `GET /functions/v1/checkout?order=<razorpay order id>`. Tickets come only from the webhook; success waits for them (up to 60 s)
+- [x] New Edge Function `checkout` (no sign-in): Razorpay hosted checkout page, nonce CSP, key id only, no secret. Tests: 3 pass
+- [x] `tickets` (`mine`) now also returns `events.id` and `ticket_types.id` (for the app). Redeploy `tickets` with the other functions
+- [x] `app.json`: `expo-camera` plugin (camera permission text, QR only). `expo-secure-store` plugin
+- [x] `eas.json`: development profile has `"environment": "development"` so EAS env values apply
+- [x] `scripts/set-mobile-env-dev.ps1`: stores the DEV URL, anon key, and gate event id in EAS (prompts for the key; refuses production)
+
+Not in this zip (on purpose):
+- [ ] Resale and group screens are still mock (Phase 2.8 mobile wiring, next zip)
+- [ ] FairQueue is still a timer (no server queue)
+- [ ] Device registration screens (`devices` function) are UI only; Android Keystore attestation is skipped (demo device path, Phase 2b)
+- [ ] Expo lint: the repo has no ESLint config for `apps/mobile`; `expo lint` asks to install one. Not added in this zip. Typecheck and bundle are the checks used.
+
+Checks (13 Nov):
+- `tsc --noEmit` (apps/mobile): pass
+- `expo export --platform android` (bundle, Hermes): pass
+- Mapper unit tests (Node test runner, sandbox): 12 of 12 pass. Mutants: ALREADY_USED mapping, DONE_STATUSES, min→max price: 3 of 3 caught
+- Deno (all Edge Functions, incl. checkout page): 108 pass
+- `deno check` for `checkout/index.ts` and `tickets/index.ts`: pass
+- Lockfile: only `expo-camera` and `expo-secure-store` added (86 lines)
+
+Dev test (user, after deploy): demo attendee sign-in with the DEV demo code → events list → checkout with Razorpay test mode → tickets appear → QR → organiser scans (camera) → VALID, then ALREADY USED on the second scan.
 
 ## Phase 3 — Blockchain (Polygon Amoy, testnet)
 

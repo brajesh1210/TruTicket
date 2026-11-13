@@ -40,7 +40,7 @@ Copy-Item (Join-Path $repo 'supabase\config.toml') (Join-Path $stage 'supabase\c
 
 Push-Location $stage
 try {
-  foreach ($fn in @('auth', 'devices', 'events', 'orders', 'razorpay_webhook', 'tickets', 'scanner_verify', 'resale', 'groups', 'chain')) {
+  foreach ($fn in @('auth', 'devices', 'events', 'orders', 'checkout', 'razorpay_webhook', 'tickets', 'scanner_verify', 'resale', 'groups', 'chain')) {
     Write-Host "Deploying $fn ..." -ForegroundColor Cyan
     npx --yes supabase@2 functions deploy $fn --no-verify-jwt --use-api --project-ref $ProjectRef
     if ($LASTEXITCODE -ne 0) { throw "deploy of $fn failed with code $LASTEXITCODE" }

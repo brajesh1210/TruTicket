@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Screen } from "../../components/Screen";
 import { EventCard } from "../../components/EventCard";
 import { Logo } from "../../components/Logo";
-import { MOCK_EVENTS } from "../../mock/events";
+import { useEvents } from "../../services/events";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
 const CHIPS = ["Discover", "Concerts", "Sports", "Comedy", "Festivals"] as const;
@@ -14,14 +14,16 @@ export default function Explore() {
   const [chip, setChip] = useState<(typeof CHIPS)[number]>("Discover");
   const [query, setQuery] = useState("");
 
+  const all = useEvents();
+
   const events = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return MOCK_EVENTS.filter((e) => {
+    return (all.data ?? []).filter((e) => {
       const chipOk = chip === "Discover" || e.category === chip;
       const qOk = !q || e.title.toLowerCase().includes(q) || e.venue.toLowerCase().includes(q);
       return chipOk && qOk;
     });
-  }, [chip, query]);
+  }, [chip, query, all.data]);
 
   const highlights = events.slice(0, 3);
   const trending = events.slice(0, 4);
@@ -59,6 +61,13 @@ export default function Explore() {
       </ScrollView>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {all.error ? (
+          <Text style={styles.empty} onPress={all.reload} accessibilityRole="button">
+            {all.error} Tap to retry.
+          </Text>
+        ) : null}
+        {all.loading && !all.data ? <Text style={styles.empty}>Loading events…</Text> : null}
+
         {highlights.length > 0 ? (
           <>
             <SectionHeader title="This Week's Highlights" />

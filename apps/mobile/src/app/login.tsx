@@ -4,7 +4,7 @@ import { router } from "expo-router";
 import { Button } from "../components/Button";
 import { Logo } from "../components/Logo";
 import { Screen } from "../components/Screen";
-import { DEMO_MODE, signInAsDemo, signInWithGoogle } from "../auth/session";
+import { DEMO_EMAIL, DEMO_MODE, requestEmailOtp, signInWithGoogle } from "../auth/session";
 import { colors, fontSize, space } from "../theme";
 
 /**
@@ -29,9 +29,11 @@ export default function Login() {
   async function onDemo() {
     setBusy(true);
     setError(null);
-    const res = await signInAsDemo();
+    // Demo account: sends the demo code like any other email. The server only accepts the
+    // demo code for demo emails on the DEV project.
+    const res = await requestEmailOtp(DEMO_EMAIL);
     setBusy(false);
-    if (res.ok) router.replace("/(tabs)");
+    if (res.ok) router.push({ pathname: "/login/otp", params: { email: DEMO_EMAIL } });
     else setError(res.error);
   }
 

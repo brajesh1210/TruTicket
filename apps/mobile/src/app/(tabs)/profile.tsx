@@ -10,7 +10,7 @@ export default function Profile() {
   const { session } = useAuth();
 
   function onLogout() {
-    signOut();
+    void signOut();
     router.replace("/login");
   }
 
@@ -28,7 +28,7 @@ export default function Profile() {
         <Row label="Security & devices" onPress={() => router.push("/security")} />
         <Row label="Resale marketplace" onPress={() => router.push("/resale")} />
         <Row label="Group distribution" onPress={() => router.push({ pathname: "/group/[id]", params: { id: "grp-1" } })} />
-        <Row label="Gate staff (demo)" onPress={() => router.push("/gate")} last />
+        <Row label="Gate staff" onPress={() => router.push("/gate")} last />
       </View>
 
       <Button label="Log out" variant="ghost" onPress={onLogout} testID="logout" />

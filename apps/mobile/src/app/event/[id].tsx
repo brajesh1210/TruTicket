@@ -4,18 +4,18 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
-import { getEvent } from "../../mock/events";
+import { useEvent } from "../../services/events";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
 export default function EventDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const event = getEvent(id);
+  const { data: event, loading, error } = useEvent(id);
 
   if (!event) {
     return (
       <Screen>
         <Stack.Screen options={{ headerShown: false }} />
-        <Text style={styles.missing}>Event not found.</Text>
+        <Text style={styles.missing}>{loading ? "Loading…" : error ?? "Event not found."}</Text>
         <Button label="Go back" variant="ghost" onPress={() => router.back()} />
       </Screen>
     );
