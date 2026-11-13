@@ -21,6 +21,8 @@ export interface Config {
   razorpayKeyId: string;
   razorpayKeySecret: string;
   razorpayWebhookSecret: string;
+  /** Signs the rotating ticket QR (2.7). Empty means QR issue and scan refuse to run. */
+  qrHmacKey: string;
 }
 
 function required(name: string): string {
@@ -70,5 +72,6 @@ export function loadConfig(): Config {
     razorpayKeyId: Deno.env.get("RAZORPAY_KEY_ID") ?? "",
     razorpayKeySecret: Deno.env.get("RAZORPAY_KEY_SECRET") ?? "",
     razorpayWebhookSecret: Deno.env.get("RAZORPAY_WEBHOOK_SECRET") ?? "",
+    qrHmacKey: Deno.env.get("QR_HMAC_KEY") ?? "",
   };
 }

@@ -22,3 +22,19 @@ verify_jwt = false
 [functions.razorpay_webhook]
 enabled = true
 verify_jwt = false
+
+[functions.tickets]
+enabled = true
+verify_jwt = false
+
+[functions.scanner_verify]
+enabled = true
+verify_jwt = false
+
+[functions.resale]
+enabled = true
+verify_jwt = false
+
+[functions.groups]
+enabled = true
+verify_jwt = false

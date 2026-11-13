@@ -551,3 +551,5 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - The 2.3 accepted gap is unchanged: reused refresh token does not revoke the family on dev (reuse checks 7 and 8 fail). 2.10 does not claim it is fixed.
 - `apps/mobile/src/auth/session.ts` has a hardcoded demo OTP (`123456`) and demo emails `@truticket.test`. Dev uses `@example.com` and a `DEMO_OTP_CODE` secret. Replace in 2.9 (mobile wiring) and ensure the demo path is only reachable with `DEMO_MODE=true`.
 - The OTP per-email limit (30 guesses per 15 min) is in `otp_flow.ts`, not yet in `limits.ts`.
+
+
