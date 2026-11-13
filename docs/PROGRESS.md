@@ -300,8 +300,9 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 | 2.4 | Rate limits | Branch `feature/phase2-4-rate-limits` (commit `fca9f17`), on top of 2.3. Deployed to dev. Tests 71 pass. |
 | 2.5 | Events and inventory | Branch `feature/phase2-5-inventory`, on top of 2.4. DB checks 15 pass (PGlite), 4 mutants caught. Dev run pending. |
 | 2.6 | Orders and Razorpay Test | Merged to `main`. Dev end-to-end passed (3 of 3). DB checks T35 to T43, 6 of 6 mutants caught. |
-| 2.7 | Tickets, rotating QR, gate scan | Branch `feature/phase2-7-tickets`. DB checks T44 to T56 pass (PGlite), 8 of 8 mutants caught. Deno 82 pass. Dev run pending. |
-| 2.8 to 2.10 | Resale, group tickets, mobile wiring, RLS tests | Not started. |
+| 2.7 | Tickets, rotating QR, gate scan | Branch `feature/phase2-7-tickets` (commit `08147f8`, pushed). DB checks T44 to T56 pass (PGlite), 8 of 8 mutants caught. Deno 82 pass. Dev gate test: 4 of 4 pass (13 Nov). |
+| 2.8 | Resale price cap, transfers, group tickets (FR-027) | Branch `feature/phase2-8-resale-group`, on top of 2.7. DB checks T57 to T80 pass (PGlite), 12 of 12 mutants caught. Deno 93 pass. Dev run pending (`test-resale-dev.ps1`). |
+| 2.9 to 2.10 | Mobile wiring (expo-camera build), RLS and auth tests | Not started. |
 
 ## Phase 2.3 — Sessions and devices (single session, device binding, Android attestation)
 
@@ -480,3 +481,45 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - No offline scanning. The scan needs the network.
 - The scanner check uses the first active scanner when `scanner_id` is not sent. Fine for the demo; the phone app will send its own id (2.9).
 
+## Phase 2.8 — Resale with a price cap, and group tickets (FR-027)
+
+**Built (branch `feature/phase2-8-resale-group`, on top of 2.7):**
+- `supabase/migrations/007_resale_group.sql` (service role only):
+  - Event resale policy: `resaleCapBps` (default 11000 = 110%), `resaleTransferLimit` (default 2), `resaleCutoffAt` (default: event start). Ticket types: `groupEligible` (default false).
+  - Cap: `resale_max_price_minor()` = floor(face × capBps / 10000). Checked at listing (`resale_list`) and again at payment (`apply_resale_captured`).
+  - Listing: `resale_list`, `resale_cancel`. A listed ticket is `LISTED` and gets no QR (`issue_qr_nonce` needs `ISSUED_ACTIVE`). The gate also refuses it (`scan_ticket`).
+  - Purchase: `resale_begin_purchase` holds the listing for 15 minutes (one attempt at a time), `resale_record_provider_order` stores the Razorpay order, `apply_resale_captured` transfers the ticket (owner changes, `transferCount` +1, old QR credentials revoked, `transfers` row), `apply_resale_failed` releases the hold.
+  - A payment whose hold was replaced, whose amount is wrong, or which arrives after cutoff is marked `refund_needed`. It never transfers.
+  - Group: a ticket of a `groupEligible` type goes to the manager's bucket (`ISSUED_UNASSIGNED_GROUP`) by trigger. No QR there.
+  - `group_allocate` (invite by email; only the hash of the claim code is stored), `group_claim` (once; the invited, verified email only; zero-price transfer; `transferCount` unchanged), `group_revoke` (before claim), `group_keep_for_self` (one bucket ticket per manager).
+- `services/api/supabase/functions/resale/index.ts`: `listings`, `list`, `cancel`, `buy`. `buy` returns a Razorpay order for the hold.
+- `services/api/supabase/functions/groups/index.ts`: `mine`, `allocate` (emails the claim code; if the email fails the invite is cancelled), `claim`, `revoke`, `keep`.
+- `services/api/supabase/functions/razorpay_webhook/index.ts`: routes a payment to the resale functions when its Razorpay order belongs to a resale attempt. Ticket orders are unchanged.
+- `_shared/resale.ts` (cap maths, price check, rupee format), `_shared/group.ts` (claim code), `_shared/outcome.ts` (result code to HTTP error).
+- `supabase/APPLY_2_8_TO_SUPABASE_DEV.sql`: 007 with a dev header. Dev only.
+- `supabase/DEV_ONLY_2_8_resale_group_fixture.sql`: two fixed test tickets for the demo attendee (one General for resale, one Corporate Bulk for the bucket). Dev only. Re-runnable.
+- `scripts/test-resale-dev.ps1`: 7 dev checks (above-cap refused, at-cap accepted, invite, claim, second claim refused, manager has no QR, cleanup).
+- `scripts/deploy-functions.ps1` and `supabase/config.toml`: `resale` and `groups` added.
+
+**Tests:**
+- Database (PGlite): `supabase/tests/007_resale_group.test.sql`, T57 to T80, one transaction, ends with ROLLBACK. Chain: stubs, 001, 002, 002b, 004, 003, accounts, 003, 005, 006, 007, then the tests. All pass.
+- Mutation check (`mutate_resale.mjs`): 12 of 12 caught (no price cap, no transfer limit, no cutoff, no amount check, no QR revoke, no payment dedupe, claim not single-use, no email match, no bucket trigger, no self-invite check, no hold check, no keep limit).
+- Fixture (`DEV_ONLY_2_8`): applies, runs twice, statuses correct.
+- Deno: 93 pass (82 before, plus 11 in `resale_test.ts`, `group_test.ts`, `outcome_test.ts`). `deno check` exit 0 on `resale`, `groups`, `razorpay_webhook`.
+
+**Not yet tested:** on the dev project (`test-resale-dev.ps1`). The payment-to-transfer path needs a real Razorpay Test checkout. PGlite covers the database side of it.
+
+**Decisions taken in 2.8 (please confirm):**
+- Default cap is 110% (PRD example), transfer limit 2, cutoff = event start. The organiser sets these per event later (web resale policy screen is still mock).
+- The transfer count goes up on resale only. A group claim is zero-price and does not count.
+- Only the Corporate Bulk type (`groupEligible`) goes to the bucket. A single buyer of that type must call `keep` to get a QR. The mobile app must show this in 2.9.
+- Invite code is valid for 7 days. Dev mode also returns the code in the response (`DEMO_MODE` only) so the dev test can claim without a mailbox.
+
+**Known gaps (2.8):**
+- **No resale fee yet** (PRD: 1 to 3%). No seller settlement ledger for resale. Needs a decision on the fee rate.
+- **Refunds for `refund_needed` payments are manual.** No automatic Razorpay refund call yet.
+- A Razorpay order that fails to create leaves the hold for up to 15 minutes. Then it is released on the next attempt.
+- Resale and group actions are not rate-limited, and do not write `audit_logs` yet (append-only audit is in 2.10).
+- A buyer who pays for a listing and then gets `payment.failed` on the same Razorpay order, then succeeds on a retry, is refused and flagged `refund_needed`. Safe, but it needs a human to refund.
+- Group order quantity: each purchase request is capped at 10 tickets (`reserve_inventory`). Corporate teams buy in several requests until the per-account limit (set on the ticket type).
+- Mobile wiring (2.9) and RLS tests (2.10) are not part of 2.8.

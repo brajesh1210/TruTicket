@@ -30,3 +30,11 @@ verify_jwt = false
 [functions.scanner_verify]
 enabled = true
 verify_jwt = false
+
+[functions.resale]
+enabled = true
+verify_jwt = false
+
+[functions.groups]
+enabled = true
+verify_jwt = false
