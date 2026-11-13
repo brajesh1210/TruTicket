@@ -1,6 +1,6 @@
 # TruTicket — Progress Tracker
 
-_Last updated: 2026-11-04. Progress file is kept in the workspace and is NOT committed. Update it at every step._
+_Last updated: 2026-11-12. Progress file is kept in the workspace and is NOT committed. Update it at every step._
 
 Legend: [x] done · [~] scaffold/draft exists but not tested · [ ] not started
 
@@ -290,6 +290,17 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Sample gate buttons vs camera build first (PLAN §6 item 4).
 - Brevo sender: the sender address must be verified in Brevo before sends work. Brevo may ask for account approval before sending. Domain authentication (SPF/DKIM) is recommended before real users.
 
+## Phase 2 status (overview)
+
+| Package | Scope | Status |
+|---|---|---|
+| 2.1 | DB foundation (002) | Merged to `main` (`062f6f3`). Verified on Docker PG 17 and dev. |
+| 2.2 | Auth: Google and email code | Merged to `main`. Verified on dev (email code end to end). Real Google token pending 2.9. |
+| 2.3 | Sessions, devices, attestation | PR open (`feature/phase2-3-sessions`, commit `9a672de`). Dev: 6 of 8 checks. **Known gap: refresh reuse.** |
+| 2.4 | Rate limits | Branch `feature/phase2-4-rate-limits` (commit `fca9f17`), on top of 2.3. Deployed to dev. Tests 71 pass. |
+| 2.5 | Events and inventory | Branch `feature/phase2-5-inventory`, on top of 2.4. DB checks 15 pass (PGlite), 4 mutants caught. Dev run pending. |
+| 2.6 to 2.10 | Orders, tickets, resale, mobile wiring, RLS tests | Not started. |
+
 ## Phase 2.3 — Sessions and devices (single session, device binding, Android attestation)
 
 **Done (code, tests, guide):**
@@ -345,3 +356,56 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Brevo sender domain (SPF/DKIM) before real users.
 - Mobile wiring for challenge and register (2.9).
 - Production (`ccqbubgebsayoviilnul`): not touched. 002b, functions and secrets are not applied there. Needs explicit approval.
+
+## Phase 2.4 — Rate limits
+
+**Built (branch `feature/phase2-4-rate-limits`, on top of 2.3, commit `fca9f17`):**
+- `_shared/rate_limit.ts`: `enforceLimit()` throws 429 `RATE_LIMITED` when a window is full. Built on `rate_limit_hit()` from 002 (atomic, fixed window).
+- `_shared/limits.ts`: every auth limit in one place.
+  - Email code (2.2, now tested): 5 wrong tries per code, then locked (`OTP_LOCKED`). Per email: 5 codes an hour, 30 wrong tries in 15 minutes. Per IP: 30 codes an hour.
+  - Google sign-in: 60 per hour per IP (checked before the Google token).
+  - Devices: 300 per hour per IP (checked before the token is read). Per account: status 60, challenge 20, register 5, activate 10 per hour.
+- `auth/index.ts` and `devices/index.ts` call the limits. Nothing else changed.
+- No database change.
+
+**Tests:**
+- Deno: 71 pass (63 from 2.3, plus 5 `rate_limit_test.ts` and 3 `otp_flow_test.ts`). `deno check` on `auth` and `devices`: exit 0.
+- `otp_flow_test.ts` pins `OTP_MAX_ATTEMPTS` to 5, so changing the constant fails the test.
+- Deployed to dev (`truticket-dev`, `oviqjnzlgbkmggytaqao`) with `deploy-functions.ps1`. No SQL, no secret change.
+
+**Not yet tested live:** the "5 wrong codes then block" on the real dev API (needs a real email code; the Deno test proves the logic). Do this with the 2.3 dev test if needed.
+
+**Open:**
+- Refresh-token reuse gap from 2.3 (not changed by 2.4).
+- Limits are per IP and per account. A shared IP (office or mobile carrier NAT) can hit the IP limit. Revisit before launch.
+
+**Decisions made in 2.4 (confirm with the user):**
+- Limits are fixed windows, not sliding. Simple, one row per window, and enough for the done-when test.
+- The devices IP limit (300 per hour) is high on purpose, so a normal app session never hits it.
+
+## Phase 2.5 — Events and inventory
+
+**Built (branch `feature/phase2-5-inventory`, on top of 2.4):**
+- `supabase/migrations/003_seed.sql`: demo event "TruTicket Demo Night" (published) with 3 ticket types (General Rs 499, VIP Rs 1499, Student Rs 199) and one demo gate scanner. Runs only after the demo organiser has signed in once. Safe to run twice.
+- `supabase/migrations/004_functions.sql`: `available_inventory()`, `reserve_inventory()` (atomic, row lock on the ticket type), `release_expired_reservations()`. Service role only.
+  - Sold = tickets not revoked, cancelled or refunded. Held = active reservations not expired.
+  - Reservation hold: 10 minutes (60 to 1800 allowed). Quantity 1 to 10. Per-account limit from `ticket_types."perAccountLimit"` (4).
+  - Refused with a message code: `NOT_FOUND`, `EVENT_NOT_PUBLISHED`, `NOT_ON_SALE`, `LIMIT_REACHED`, `SOLD_OUT`, `INVALID_QUANTITY`.
+- `services/api/supabase/functions/events/index.ts`: actions `list`, `get` (public), `create` (verified organiser, always a draft), `reserve` (signed in, active profile, verified email).
+- `supabase/APPLY_2_5_TO_SUPABASE_DEV.sql`: 004 and 003 for the dev project only.
+- `scripts/demo-accounts-dev.ps1`: creates the two demo accounts on dev. Refuses production.
+- `scripts/deploy-functions.ps1`: now deploys `events` too. `supabase/config.toml`: `[functions.events]` added.
+
+**Tests:**
+- Database (PGlite, PG 18): `004_inventory.test.sql`, T27 to T34, all pass. Chain: stubs, 001, 002, 002b, 004, 003 (no organiser: creates nothing), accounts, 003 twice (1 event, 3 types, 1 scanner), then T27 to T34.
+- Mutation check: 4 mutants caught (no per-account limit, no sale window, held seats ignored, no publish check).
+- Deno: `events/index.ts` type check passes. No unit tests for the events function yet (its logic is in SQL).
+
+**Not yet tested:** on the real dev project (needs the demo accounts and `DEMO_MODE=true` on dev); Docker PG 17 run; concurrent reservations (PGlite is single-session).
+
+**Known gaps and decisions (2.5):**
+- The reserve action checks the profile and verified email, not the full session gate (`session_can_transact`). The full gate is applied when an order is created (2.6).
+- Reservations expire by time only. The cron that calls `release_expired_reservations()` is not set up yet. Expired holds are ignored by the count, so the cron is for tidiness.
+- An event goes live only when an admin sets it to `published`. No admin screen does that yet (web, Phase 4).
+- Demo accounts use `@example.com` addresses and `DEMO_MODE=true` on dev only. Never on production.
+

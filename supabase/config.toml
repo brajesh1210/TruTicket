@@ -10,3 +10,7 @@ verify_jwt = false
 [functions.devices]
 enabled = true
 verify_jwt = false
+
+[functions.events]
+enabled = true
+verify_jwt = false

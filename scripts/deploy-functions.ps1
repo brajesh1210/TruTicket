@@ -1,4 +1,4 @@
-# TruTicket: deploy the auth and devices Edge Functions (package 2.3) to a Supabase project.
+# TruTicket: deploy the auth, devices and events Edge Functions (packages 2.3 and 2.5) to a Supabase project.
 # Run from the repo root, in PowerShell:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-functions.ps1 -ProjectRef <ref>
 # First time on this PC, the CLI asks you to log in: npx --yes supabase@2 login
@@ -40,7 +40,7 @@ Copy-Item (Join-Path $repo 'supabase\config.toml') (Join-Path $stage 'supabase\c
 
 Push-Location $stage
 try {
-  foreach ($fn in @('auth', 'devices')) {
+  foreach ($fn in @('auth', 'devices', 'events')) {
     Write-Host "Deploying $fn ..." -ForegroundColor Cyan
     npx --yes supabase@2 functions deploy $fn --no-verify-jwt --use-api --project-ref $ProjectRef
     if ($LASTEXITCODE -ne 0) { throw "deploy of $fn failed with code $LASTEXITCODE" }
@@ -50,4 +50,4 @@ finally {
   Pop-Location
 }
 
-Write-Host "auth and devices functions deployed to project $ProjectRef" -ForegroundColor Green
+Write-Host "auth, devices and events functions deployed to project $ProjectRef" -ForegroundColor Green
