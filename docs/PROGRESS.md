@@ -299,8 +299,9 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 | 2.3 | Sessions, devices, attestation | PR open (`feature/phase2-3-sessions`, commit `9a672de`). Dev: 6 of 8 checks. **Known gap: refresh reuse.** |
 | 2.4 | Rate limits | Branch `feature/phase2-4-rate-limits` (commit `fca9f17`), on top of 2.3. Deployed to dev. Tests 71 pass. |
 | 2.5 | Events and inventory | Branch `feature/phase2-5-inventory`, on top of 2.4. DB checks 15 pass (PGlite), 4 mutants caught. Dev run pending. |
-| 2.6 | Orders and Razorpay Test | Branch `feature/phase2-6-orders`, on top of 2.5. DB checks T35 to T43 pass (PGlite), 6 of 6 mutants caught. Deno 76 pass. Dev run pending. |
-| 2.7 to 2.10 | Tickets, resale, mobile wiring, RLS tests | Not started. |
+| 2.6 | Orders and Razorpay Test | Merged to `main`. Dev end-to-end passed (3 of 3). DB checks T35 to T43, 6 of 6 mutants caught. |
+| 2.7 | Tickets, rotating QR, gate scan | Branch `feature/phase2-7-tickets`. DB checks T44 to T56 pass (PGlite), 8 of 8 mutants caught. Deno 82 pass. Dev run pending. |
+| 2.8 to 2.10 | Resale, group tickets, mobile wiring, RLS tests | Not started. |
 
 ## Phase 2.3 — Sessions and devices (single session, device binding, Android attestation)
 
@@ -434,7 +435,9 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Mutation check (`mutate_orders.mjs`): 6 of 6 caught (no amount check, no duplicate guard, no already-issued guard, no expiry check, failed payment does not release, begin_order not idempotent).
 - Deno: 76 pass (71 from 2.4 plus 5 new in `razorpay_test.ts`). `deno check` exit 0 on `auth`, `devices`, `events`, `orders`, `razorpay_webhook`.
 
-**Not yet tested:** on the real dev project (needs 2.5 Part D done, Razorpay TEST keys, and the webhook URL set in Razorpay); real Razorpay Checkout payment (comes with the mobile wiring, 2.9); concurrent orders (PGlite is single-session); Docker PG 17 (optional).
+**Dev:** `test-orders-dev.ps1` passed on 13 Nov (hold, Razorpay TEST order, ISSUED, DUPLICATE, 401). Needed the dev test device (`DEV_ONLY_2_6_demo_attendee_device.sql`).
+
+**Not yet tested:** a real Razorpay Checkout payment (comes with the mobile wiring, 2.9); concurrent orders (PGlite is single-session); Docker PG 17 (optional).
 
 **Known gaps and decisions (2.6):**
 - The dev test simulates the signed webhook. It does not pay with a real test card. A real test payment is checked in 2.9 with Razorpay Checkout on the phone.
@@ -443,4 +446,37 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - The webhook uses the `X-Razorpay-Event-Id` header when present, and a hash of the body if it is missing. Confirm on the first live test that Razorpay sends the header.
 - Ticket price is the ticket type's face value. Fees and GST are not handled in 2.6.
 - The first dev run failed with `CANNOT_TRANSACT`. Cause: the test sign-in had no device link, so `session_can_transact()` correctly refused it. Fix: the dev device fixture and `device_key_id` at sign-in. The gate itself was not changed.
+
+## Phase 2.7 — Tickets, rotating QR and gate scan
+
+**Built (branch `feature/phase2-7-tickets`, on top of 2.6):**
+- `supabase/migrations/006_tickets.sql`:
+  - `issue_qr_nonce()`: stores a QR nonce (hash only) for a ticket the caller owns and that is active. Lives 10 seconds.
+  - `scan_ticket()`: one transaction. Locks the ticket row, then decides and records the result in `redemptions`. Results: VALID, ALREADY_USED, EXPIRED, WRONG_EVENT, INVALID.
+  - A retry with the same scan key returns the same answer and adds no row. A key used for another ticket is refused (`KEY_REUSED`).
+  - A scanner that is not active for the event is refused (`SCANNER_NOT_FOUND`).
+  - Service role only.
+- `services/api/supabase/functions/_shared/qr.ts`: QR token `TT1.<ticketId>.<exp>.<nonce>.<sig>`. `sig` is an HMAC-SHA256 (`QR_HMAC_KEY`), cut to 32 hex characters. The phone never sees the key.
+- `services/api/supabase/functions/tickets/index.ts`: `mine` (my tickets) and `qr` (a new QR, 10 seconds). `qr` needs the full gate (`session_can_transact`).
+- `services/api/supabase/functions/scanner_verify/index.ts`: the gate scan. Caller must pass the full gate and be the organiser of the event. A bad signature is INVALID without touching the database. Scanner id is optional (the event's first active scanner is used).
+- **Replaces** the old placeholder `services/api/supabase/functions/scanner/verify/index.ts`. That placeholder used snake_case columns that do not exist in this schema, was not atomic, and returned a `REVOKED` result that is not in the spec. Its folder is removed in the guide.
+- `supabase/APPLY_2_7_TO_SUPABASE_DEV.sql`: 006 with a dev header. Dev only.
+- `supabase/DEV_ONLY_2_6_demo_attendee_device.sql`: now covers the organiser too (`dev-demo-organiser-device`). Re-run it on dev.
+- `scripts/set-qr-secret-dev.ps1`: makes a random `QR_HMAC_KEY` and sets it on dev. The key is never printed.
+- `scripts/test-gate-dev.ps1`: end-to-end dev check: an old QR (EXPIRED), a fresh QR (VALID), the same QR again (ALREADY_USED), a changed QR (INVALID).
+- `scripts/deploy-functions.ps1`: now deploys `tickets` and `scanner_verify` too. `supabase/config.toml`: both added.
+
+**Tests:**
+- Database (PGlite, PG 18): `supabase/tests/006_tickets.test.sql`, T44 to T56, one transaction, ends with ROLLBACK. Chain: stubs, 001, 002, 002b, 004, 003, accounts, 003, 005, 006, then the tests. All pass.
+- Mutation check (`mutate_tickets.mjs`): 8 of 8 caught (no expiry check, no idempotency, no event check, no used check, no scanner check, no owner check, no key-reuse check, no nonce match).
+- Deno: 82 pass (76 before, plus 6 in `qr_test.ts`). `deno check` exit 0 on `auth`, `devices`, `events`, `orders`, `razorpay_webhook`, `tickets`, `scanner_verify`.
+
+**Not yet tested:** on the real dev project; real concurrency (two scans at the same millisecond). The row lock is what makes that safe, but PGlite is single-session, so the lock itself is not proven by a test. Phone camera scanning (2.9).
+
+**Known gaps and decisions (2.7):**
+- **QR TTL is 10 seconds (PRD §6.4).** Network time eats part of it. If a scan reaches the server after 10 seconds, it returns EXPIRED. Decision still open: keep 10 s, or allow a small grace. The PRD says 10 s.
+- Only the event's organiser can scan. Gate staff assignment comes later (Phase 4).
+- QR issue is not rate-limited yet. Each QR adds one row to `qr_credentials`. Old rows are not purged yet.
+- No offline scanning. The scan needs the network.
+- The scanner check uses the first active scanner when `scanner_id` is not sent. Fine for the demo; the phone app will send its own id (2.9).
 
