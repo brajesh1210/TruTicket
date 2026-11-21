@@ -11,10 +11,13 @@
 [![Polygon Amoy](https://img.shields.io/badge/Polygon-Amoy_Testnet-8247E5?style=for-the-badge&logo=polygon)](https://polygon.technology/)
 [![Supabase](https://img.shields.io/badge/Supabase-Edge_Functions-3ECF8E?style=for-the-badge&logo=supabase)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![Android Preview](https://img.shields.io/badge/Android_Preview-Download_APK-3DDC84?style=for-the-badge&logo=android)](docs/ANDROID_INSTALL.md)
 
 **Fair access. Genuine tickets. Controlled resale.**
 
 *A production-grade, end-to-end event ticketing infrastructure engineered to eliminate scalper bots, counterfeiting, and secondary-market extortion.*
+
+> 📱 **Looking to test the mobile app on Android?** See the [Android Install Guide](docs/ANDROID_INSTALL.md) to download the latest preview APK.
 
 </div>
 
