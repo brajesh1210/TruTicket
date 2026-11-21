@@ -1,0 +1,98 @@
+name: Mobile OTA Update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/mobile-ota-update.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ota-update-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ota-update:
+    name: Publish EAS OTA Update
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Read commit details
+        id: commit_info
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "commit_msg<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$COMMIT_MSG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Fail-fast check
+        run: |
+          npm ci --ignore-scripts
+          cd apps/mobile
+          npx tsc --noEmit
+
+      - name: Set up Expo & EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish EAS OTA update
+        id: publish_update
+        working-directory: apps/mobile
+        env:
+          SHORT_SHA: ${{ steps.commit_info.outputs.short_sha }}
+          COMMIT_MSG: ${{ steps.commit_info.outputs.commit_msg }}
+        run: |
+          echo "Publishing EAS OTA update to branch preview..."
+          # Publish update and capture output for summary
+          eas update --branch preview --environment preview --non-interactive --platform android --message "${SHORT_SHA} ${COMMIT_MSG}" | tee eas-update-output.txt
+
+          # Parse update group ID if present in output
+          UPDATE_GROUP_ID=$(grep -i "update group id" eas-update-output.txt | awk '{print $NF}' | tr -d '\r\n' || true)
+          echo "update_group_id=$UPDATE_GROUP_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        env:
+          SHORT_SHA: ${{ steps.commit_info.outputs.short_sha }}
+          COMMIT_MSG: ${{ steps.commit_info.outputs.commit_msg }}
+          UPDATE_GROUP_ID: ${{ steps.publish_update.outputs.update_group_id }}
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## 🚀 TruTicket Mobile OTA Update Published
+
+          - **Branch:** \`preview\`
+          - **Platform:** Android
+          - **Commit:** \`${SHORT_SHA}\` — ${COMMIT_MSG}
+          EOF
+
+          if [ -n "$UPDATE_GROUP_ID" ]; then
+            echo "- **Update Group ID:** \`${UPDATE_GROUP_ID}\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+
+          Installed apps on the \`preview\` channel will download this update on next launch and apply it automatically.
+          EOF

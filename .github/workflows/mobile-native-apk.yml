@@ -1,0 +1,163 @@
+name: Mobile Native APK Build
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build & Publish Native Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Read commit details
+        id: commit_info
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_SHA=$(git rev-parse HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "commit_msg<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$COMMIT_MSG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Fail-fast check
+        run: |
+          npm ci --ignore-scripts
+          cd apps/mobile
+          npx tsc --noEmit
+
+      - name: Set up Expo & EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build with EAS in the cloud
+        id: eas_build
+        working-directory: apps/mobile
+        run: |
+          echo "Triggering native Android APK cloud build..."
+          # Write EAS stdout to a file (non-JSON messages go to stderr automatically via --json)
+          eas build --platform android --profile preview --non-interactive --wait --json > eas-build-output.json
+
+          # Verify output file exists
+          if [ ! -s eas-build-output.json ]; then
+            echo "::error::EAS output file is missing or empty."
+            exit 1
+          fi
+
+          # Extract build ID
+          BUILD_ID=$(jq -r '(if type=="array" then .[0] else . end) | .id // empty' eas-build-output.json)
+
+          # Extract APK download URL strictly from artifacts.buildUrl
+          APK_URL=$(jq -r '(if type=="array" then .[0] else . end) | .artifacts.buildUrl // empty' eas-build-output.json)
+
+          if [ -z "$APK_URL" ]; then
+            echo "::error::artifacts.buildUrl field is missing in EAS build output."
+            echo "Available keys in EAS build output:"
+            jq '(if type=="array" then .[0] else . end) | {top_level_keys: keys, artifact_keys: (.artifacts | keys?)}' eas-build-output.json
+            exit 1
+          fi
+
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK artifact
+        env:
+          SHORT_SHA: ${{ steps.commit_info.outputs.short_sha }}
+          APK_URL: ${{ steps.eas_build.outputs.apk_url }}
+        run: |
+          echo "Downloading APK from: $APK_URL"
+          curl -L -fail -o "TruTicket-${SHORT_SHA}.apk" "$APK_URL"
+
+          if [ ! -s "TruTicket-${SHORT_SHA}.apk" ]; then
+            echo "::error::Downloaded APK is missing or empty."
+            exit 1
+          fi
+
+          # Keep TruTicket.apk as standard named copy
+          cp "TruTicket-${SHORT_SHA}.apk" TruTicket.apk
+          echo "APK downloaded successfully ($(du -h TruTicket.apk | cut -f1))"
+
+      - name: Create fresh GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: "latest-android-apk"
+          TITLE: "TruTicket Android Native APK (Latest)"
+          SHORT_SHA: ${{ steps.commit_info.outputs.short_sha }}
+          COMMIT_SHA: ${{ steps.commit_info.outputs.commit_sha }}
+          COMMIT_MSG: ${{ steps.commit_info.outputs.commit_msg }}
+          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          BUILD_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          cat <<EOF > release_notes.md
+          ## TruTicket Android Native APK
+
+          Latest native preview build from commit \`${SHORT_SHA}\`.
+
+          - **Commit SHA:** \`${COMMIT_SHA}\` (\`${SHORT_SHA}\`)
+          - **Commit Message:** ${COMMIT_MSG}
+          - **Build Time:** ${BUILD_TIME}
+          - **EAS Build ID:** \`${BUILD_ID}\`
+
+          ### 📥 Download APK
+          - **[Download TruTicket.apk (Latest)](https://github.com/${REPO}/releases/download/${TAG}/TruTicket.apk)**
+          - **[Download TruTicket-${SHORT_SHA}.apk (Archived build)](https://github.com/${REPO}/releases/download/${TAG}/TruTicket-${SHORT_SHA}.apk)**
+
+          ### 📖 Installation Guide
+          See the [Android Install Guide](https://github.com/${REPO}/blob/main/docs/ANDROID_INSTALL.md) for installation instructions.
+          EOF
+
+          # Delete existing release and stale tag if present so release is recreated fresh
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists. Deleting release and cleaning up stale tag..."
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+
+          echo "Creating fresh release $TAG targeting $COMMIT_SHA..."
+          gh release create "$TAG" TruTicket.apk "TruTicket-${SHORT_SHA}.apk" \
+            --target "$COMMIT_SHA" \
+            --title "$TITLE" \
+            --notes-file release_notes.md \
+            --latest
+
+      - name: Write summary
+        env:
+          SHORT_SHA: ${{ steps.commit_info.outputs.short_sha }}
+          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          TAG="latest-android-apk"
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## 📱 TruTicket Native Android APK Ready
+
+          - **Commit:** \`${SHORT_SHA}\`
+          - **EAS Build ID:** \`${BUILD_ID}\`
+          - **Release Tag:** [\`${TAG}\`](https://github.com/${REPO}/releases/tag/${TAG})
+          - **Direct APK Download:** [TruTicket.apk](https://github.com/${REPO}/releases/download/${TAG}/TruTicket.apk)
+          - **Archived APK:** [TruTicket-${SHORT_SHA}.apk](https://github.com/${REPO}/releases/download/${TAG}/TruTicket-${SHORT_SHA}.apk)
+
+          Friends only need to install this APK once. Subsequent code updates are delivered via OTA updates.
+          EOF
