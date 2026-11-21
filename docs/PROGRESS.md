@@ -300,7 +300,7 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 | 2.5 | Events and inventory | Branch `feature/phase2-5-inventory`, on top of 2.4. DB checks 15 pass (PGlite), 4 mutants caught. Dev run pending. |
 | 2.6 | Orders and Razorpay Test | Merged to `main`. Dev end-to-end passed (3 of 3). DB checks T35 to T43, 6 of 6 mutants caught. |
 | 2.7 | Tickets, rotating QR, gate scan | Branch `feature/phase2-7-tickets` (commit `08147f8`, pushed). DB checks T44 to T56 pass (PGlite), 8 of 8 mutants caught. Deno 82 pass. Dev gate test: 4 of 4 pass (13 Nov). |
-| 2.8 | Resale price cap, transfers, group tickets (FR-027) | Branch `feature/phase2-8-resale-group`, on top of 2.7. DB checks T57 to T80 pass (PGlite), 12 of 12 mutants caught. Deno 93 pass. Dev run pending (`test-resale-dev.ps1`). |
+| 2.8 | Resale price cap, transfers, group tickets (FR-027) | Backend merged earlier. Mobile screens wired and chain hooks added in the Phase 3 and 2.8 wiring zip (see that section). Dev run pending (`test-resale-dev.ps1`, purchase end-to-end). |
 | 2.9 | Mobile wiring (events, tickets, checkout, gate, email code, Google) | Zip 1 (13 Nov). Verified: typecheck, Android bundle, 12 mapper tests with 3 of 3 mutants caught, Deno 108 pass. Dev run pending (user). Resale and group screens still mock. |
 | 2.10 | RLS, grants, audit and security pass | Merged (see section below). |
 
@@ -516,13 +516,13 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 - Invite code is valid for 7 days. Dev mode also returns the code in the response (`DEMO_MODE` only) so the dev test can claim without a mailbox.
 
 **Known gaps (2.8):**
-- **No resale fee yet** (PRD: 1 to 3%). No seller settlement ledger for resale. Needs a decision on the fee rate.
+- **Resale fee is 0%** (decided on the user's instruction, 13 Nov). No seller settlement ledger for resale. The PRD range (1 to 3%) is not applied.
 - **Refunds for `refund_needed` payments are manual.** No automatic Razorpay refund call yet.
 - A Razorpay order that fails to create leaves the hold for up to 15 minutes. Then it is released on the next attempt.
 - Resale and group actions are not rate-limited, and do not write `audit_logs` yet (append-only audit is in 2.10).
 - A buyer who pays for a listing and then gets `payment.failed` on the same Razorpay order, then succeeds on a retry, is refused and flagged `refund_needed`. Safe, but it needs a human to refund.
 - Group order quantity: each purchase request is capped at 10 tickets (`reserve_inventory`). Corporate teams buy in several requests until the per-account limit (set on the ticket type).
-- Mobile wiring (2.9) and RLS tests (2.10) are not part of 2.8.
+- Mobile wiring for 2.8 is in the Phase 3 and 2.8 wiring section below. RLS tests are in 2.10.
 
 ## Phase 2.10 — RLS, grants, audit and security pass
 
@@ -589,6 +589,9 @@ Fix 1 (13 Nov, after first device test): purchase blocked with "Verify your emai
 - [x] `checkout/[id].tsx`: link runs before the hold, so existing sign-ins are fixed without signing in again
 - Fix 2 (13 Nov): the cause on DEV was a second phone. The demo attendee had an old ACTIVE device (`dev-demo-attendee-device`, from earlier testing), so the new phone registered as `pending`. Pending phone cannot buy. DEV SQL (demo.attendee only): old device set `revoked`, new phone set `active`. Done by user.
 - Fix 2 code: `ensureDeviceLinked` remembers the link only when the server says `active` (before it remembered `pending` too). Sessions created before activation are still unlinked, so the user must sign out and sign in again after activation.
+- Fix 3 (13 Nov): checkout page showed raw HTML source. Cause: Supabase Edge Functions serve GET `text/html` as `text/plain` (only custom domain on Pro avoids it). Fix: the page is now a static file in `pay-page/` (no secret; reads `order` and `key` from the URL). App: `EXPO_PUBLIC_PAY_PAGE_URL` in `apps/mobile/.env`. `checkout` function is unchanged (not used by the app now).
+- Fix 4 (13 Nov): after the payment page closes, checkout waits (up to 45 s) for NEW tickets from the webhook. Success shows only when tickets exist. If none come, checkout shows "Payment not confirmed yet" and the user can pay again. Also fixes the success screen that said "not confirmed" while the tickets arrived later. Files: `services/tickets.ts` (countActiveTickets), `app/checkout/[id].tsx`, `app/success.tsx`.
+- Open: second purchase showed "Payment link is incomplete" (page got no valid order/key). Being checked with the page debug line.
 - Needs on DEV only: `ATTESTATION_REQUIRED=false` (Edge secret, `truticket-dev` ref). Production keeps attestation on (Phase 2b).
 - Checks: `tsc --noEmit` pass; `expo export --platform android` pass (new code in bundle). DEV purchase test: pending (user).
 
@@ -617,14 +620,56 @@ Dev test (user, after deploy): demo attendee sign-in with the DEV demo code → 
 - Amoy deploy (needs the test wallet and test MATIC from the faucet). Run `scripts/deploy-amoy.ps1`.
 - PolygonScan verification (optional).
 - `scripts/set-chain-secrets-dev.ps1` and `deploy-functions.ps1` on DEV.
-- Mint on purchase, resale and group transfers: triggered by n8n (Phase 5). The n8n workflows are not finished yet.
+- Mint on purchase, resale and group transfers: now done by the functions themselves (best effort, see the Phase 3 and 2.8 wiring section). n8n is not used for mint.
 
 **Known gaps (Phase 3):**
 - Reconciliation: if a chain call fails after a DB change (e.g. redeem after a VALID scan), the chain and DB can disagree. n8n needs a retry job for tickets with `tokenId` set and no on-chain redeem.
 - `CHAIN_MASTER_SECRET` loss or change makes every custodial wallet unreachable. Back it up once, outside the repo.
 - Backend is the only signer. A compromised operator key can move any listed ticket. Testnet only; a hardware or multisig operator is needed before launch.
 - Amoy RPC is public. Rate limits may slow mint under load.
-- No gas budget or retry policy beyond one attempt per call.
+- No gas budget. Retries are now in the calling function (see the wiring section), not in n8n.
+
+## Phase 3 and 2.8 wiring — chain mint, resale and group on chain, mobile screens
+
+**Policy (user decision, option A, best effort):** a chain failure never changes the database result. Ticket issue, resale transfer and group transfer always stand. The chain call is retried in the background. If the mint still fails, the tickets function retries it when the buyer opens "My Tickets".
+
+**Built (backend):**
+- `_shared/chain_call.ts` (new): `callChain` (one HTTP call to `chain` with `x-internal-secret`, never throws), `withRetry` (3 tries, waits 10 s and 30 s, retries only busy, unreachable or 5xx), `mintOnChain`, `listOnChain` (mint first, then list), `cancelOnChain`, `settleOnChain` (sends `ask_minor` so the chain can list first), `allocateOnChain` (mint first), `inBackground` (`EdgeRuntime.waitUntil`, so the HTTP response is not held up).
+- `razorpay_webhook/index.ts`: after `apply_payment_captured` returns `ISSUED`, mints each ticket of the order in the background, one at a time. After `apply_resale_captured` returns `TRANSFERRED`, settles the token to the buyer. The 200 response is not delayed.
+- `chain/index.ts`: `settle` lists the token first at `ask_minor` if the listing never reached the chain. The contract still enforces the cap.
+- `resale/index.ts`: `list` puts the listing on chain in the background. `cancel` takes the on-chain listing down. New action `mine` (my ACTIVE and PURCHASE_PENDING listings, with `listing_id`, so the app can cancel).
+- `groups/index.ts`: `claim` moves the token to the member on chain (`allocate`) in the background.
+- `tickets/index.ts`: `mine` returns `resaleCapBps` for each event and no longer returns `tokenId`. It retries missing mints for up to 5 tickets, in the background (lazy retry).
+
+**Built (mobile, Phase 2.8 screens, no longer mock):**
+- `services/marketplace.ts` (pure helpers: cap maths, rupee format, ask check, listing and invite mapping, bucket grouping), `services/resale.ts`, `services/groups.ts`.
+- `app/resale/index.tsx`: real listings, my listings with "Take down listing", buy (hosted Razorpay page in the browser, then polls My Tickets up to 45 s).
+- `app/resale/sell/[id].tsx`: real list call. Cap from the event (`resaleCapBps`, default 110%). The server is the final check.
+- `app/group/index.tsx` (new): group tickets not yet given out, grouped by event and tier.
+- `app/group/[id].tsx`: real manager screen. Invite by email, cancel an open invite, counts. The invite email address is not stored (only its hash), so the screen shows status only.
+- `app/group/claim.tsx` (new): accept an invite with the claim code. Linked from Profile ("Accept a group ticket").
+- `app/(tabs)/tickets.tsx` and `profile.tsx`: group links go to `/group`. The `grp-1` mock id is gone.
+- Mock files `src/mock/resale.ts` and `src/mock/groups.ts` are still in the repo but no longer imported by these screens.
+
+**Tests:**
+- Deno: `chain_call_test.ts` 13 of 13 pass. All functions 121 pass (108 before, plus 13). `deno check` exit 0 on `razorpay_webhook`, `resale`, `groups`, `tickets`, `chain`.
+- Mutation check on `chain_call.ts`: 3 of 3 caught (retry on a 400, list without mint first, no retries).
+- Mobile: `marketplace.test.ts` 10 of 10 pass. Existing `mappers.test.ts` 12 of 12 pass. Mutation check on `marketplace.ts`: 3 of 3 caught (cap rounds up, bucket keeps assigned tickets, ask may exceed cap by 1).
+- Mobile `tsc --noEmit` exit 0.
+
+**Not yet tested (needs the user, DEV):**
+- Purchase to mint: buy a ticket, check `tickets."tokenId"` in SQL after about 1 minute, then check the token on the Amoy explorer.
+- Resale: list, buy (Razorpay test), settle. Check the token owner on chain.
+- Group: invite, claim with the code, check the token owner on chain.
+- `scripts/test-resale-dev.ps1` (7 checks). Not run yet.
+
+**Known gaps (wiring):**
+- Chain calls are best effort. A mint can stay missing if the chain is down for a long time and the buyer never opens "My Tickets". Check `tickets` with `tokenId` null in SQL.
+- Parallel purchases can still clash on the operator wallet nonce. Each call retries, so this should clear on its own, but it is not proven under load.
+- A resale listing that is later refused by the database (`refund_needed`) can stay listed on chain. Cancel it by hand until a reconciliation job exists.
+- The mint runs `setPolicy` before each mint (existing design). This costs one extra transaction per mint.
+- Group invite emails are not visible in the app after sending (hash only). The manager sees statuses.
+- Resale `listings` needs sign-in (server rule). The marketplace screen asks the user to sign in first.
 
 ## Phase 5 — n8n notifications and chain mint (Docker, polling, no public URL)
 
@@ -665,3 +710,13 @@ Dev test (user, after deploy): demo attendee sign-in with the DEV demo code → 
 - The producers read the last day only. Rows older than a day are not picked up after an n8n outage longer than a day.
 - Outbox rows have no cleanup path (keep for audit; purge later).
 - Email recipient with no profile email is retried 5 times then FAILED.
+
+## Mobile UI theme (14 Nov, user request)
+- Theme changed to dark base with lime accent and purple tags, matching the reference screens. Logo not changed.
+- Done in `apps/mobile/src/theme/index.ts` (overrides only; `packages/ui-tokens` unchanged, so web is not affected).
+- Tabs now Explore, Tickets, Resale, Profile (`(tabs)/_layout.tsx`; Resale via `(tabs)/marketplace.tsx`; categories hidden).
+- Explore, Tickets and Profile screens redesigned. Event artwork added (`assets/events/*.jpg`, picked by category in `components/EventArt.tsx`; AI-generated placeholders). Event detail hero uses artwork.
+- Bottom tab bar height includes the phone's bottom inset, so it sits above Android navigation buttons.
+- Other inner screens get the new colours only, not a full layout redesign yet.
+- Checks: `tsc --noEmit` pass, `expo export --platform android` pass. No backend change. No test change.
+- Pending: gate scan still returns CANNOT_TRANSACT on DEV (device link, see 2.9 fix notes).
