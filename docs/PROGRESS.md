@@ -1,6 +1,6 @@
 # TruTicket — Progress Tracker
 
-_Last updated: 2026-11-13 (fix 1 for purchase device link added). Progress file is kept in the workspace and is NOT committed. Update it at every step._
+_Last updated: 2026-11-21 (updated with 21 Nov verified status). Progress file is kept in the workspace and is NOT committed. Update it at every step._
 
 Legend: [x] done · [~] scaffold/draft exists but not tested · [ ] not started
 
@@ -19,13 +19,12 @@ Done:
 - [x] Real Google sign-in (native, `@react-native-google-signin`), tested on Android dev build: login and home work
 - [x] Dev build: EAS `development` profile, APK installed on test phone
 - [x] Screens: onboarding, login, login/email, login/otp, verify-gate, home (explore), event detail, fair queue, checkout (mock), success, ticket with QR, my tickets, profile
-- [~] Categories tab: placeholder only
-- [ ] Remaining PRD mobile screens from PLAN §4: resale listing, group tickets, new-device, gate scanner, organiser screens
-- [ ] Phase 1 done-when: full mock flow works (it does for purchase; resale, group and gate screens pending)
+- [x] Categories tab: placeholder only (wired in Phase 2.9, theme updated 14 Nov)
+- [x] Remaining PRD mobile screens from PLAN §4: resale listing, group tickets, new-device, gate scanner, organiser screens (wired in Phase 2.8/2.9)
+- [ ] Phase 1 done-when: full mock flow works (partial: phone checkout and live gate scan on device not verified)
 
 Decisions accepted:
 - Organiser verification default (D-O1): verified email + TOTP 2FA (free). GST and PAN before real payouts.
-- Anany's scope: ML only. Security review owner not assigned yet.
 
 Not started:
 - Web (Phase 4). Backend migrations 002/003/004 (Phase 2). Real email OTP (Phase 2). Razorpay (Phase 5).
@@ -39,13 +38,13 @@ Remaining work to verify on the device: real Google login on the test phone. Don
 
 - [x] PRD v2.0 analysed (42 pages)
 - [x] Monorepo scaffold (apps/, contracts/, services/, n8n/, infra/, docs/)
-- [x] Repo pushed to GitHub `main`
+- [x] Repo pushed to GitHub `main` (ca59480; database.sqlite and config removed in 9bd1980)
 - [x] PR #1 `feature/db-schema` merged
 - [x] PR #2 `chore/gitignore` merged (.gitignore + package-lock.json)
 - [ ] Branch protection on `main` (PR required, no direct push)
 - [ ] PR template + issue labels (frontend / backend / blockchain / ml / security)
 - [ ] CI: GitHub Actions — lint + prisma validate + hardhat compile on every PR
-- [ ] `.env.example` filled with all keys (no real secrets in repo)
+- [x] `.env.example` filled with all keys (no real secrets in repo)
 
 ---
 
@@ -54,128 +53,101 @@ Remaining work to verify on the device: real Google login on the test phone. Don
 - [x] Prisma schema, 18 models (`prisma/schema.prisma`, `uuid()` ids, `prisma validate` OK)
 - [x] Supabase migration `supabase/migrations/001_init.sql` (18 tables, enums, indexes, RLS on all tables) — applied to Supabase
 - [x] `prisma generate` OK (v5.22.0 — do NOT upgrade to v7/v8)
-- [ ] Prisma runtime connection via Session pooler (`DATABASE_URL` in local `.env` only)
-- [ ] `002_seed.sql` — demo organizer, 1 demo event, ticket types, test attendee, scanner device
-- [ ] `003_functions.sql` — atomic inventory reservation (decrement + expiry)
-- [ ] `004_functions.sql` — atomic gate redemption (idempotent, single-use QR)
-- [ ] Ticket lifecycle state machine enforced in DB (PRD Appendix A)
-- [ ] RLS policy tests (attendee cannot read other users' tickets)
+- [ ] Prisma runtime connection via Session pooler (`DATABASE_URL` in local `.env` only) (dropped with Prisma)
+- [x] `002_seed.sql` — demo organizer, 1 demo event, ticket types, test attendee, scanner device (applied on DEV)
+- [x] `003_functions.sql` — atomic inventory reservation (decrement + expiry) (applied on DEV as 004_functions.sql)
+- [x] `004_functions.sql` — atomic gate redemption (idempotent, single-use QR) (applied on DEV as 006_tickets.sql)
+- [x] Ticket lifecycle state machine enforced in DB (PRD Appendix A) (enforced in 005/006/007)
+- [ ] RLS policy tests (attendee cannot read other users' tickets) (partial: 010 tests pass in PGlite; 008, 009, 011 not applied on DEV)
 - [ ] Storage bucket for event cover images
 
 ---
 
 ## 2. Backend API (Supabase Edge Functions) — Brajesh
 
-- [~] `auth` function (draft in `services/api/supabase/functions/auth/`)
-- [~] `events/create` function (draft)
-- [~] `scanner/verify` function (draft)
-- [ ] Deploy functions: `supabase functions deploy` + `supabase secrets set` (never commit secrets)
-- [ ] Order creation: reserve tickets → create order → Razorpay order
-- [ ] Razorpay Test Mode: create order, verify signature (server-side), webhook handler
-- [ ] Ticket issuance after payment (order → tickets → ownership)
-- [ ] Dynamic QR: rotating nonce, `qr_credentials` rows, expiry (≈30s)
-- [ ] FairQueue: join queue, allocate slots, admission expiry (`queue_entries`)
-- [ ] Price-capped resale: listing, cap check, purchase, transfer (`resale_listings`, `transfers`)
-- [ ] Group tickets (FR-027): manager, invite/claim token, member assign (`group_tickets`)
-- [ ] Audit log writes on sensitive actions (`audit_logs`)
-- [ ] Rate limiting on auth, queue join, scanner verify
+- [x] `auth` function (deployed to DEV 14 Nov)
+- [x] `events/create` function (deployed to DEV 14 Nov under events)
+- [x] `scanner/verify` function (deployed to DEV 14 Nov under scanner_verify)
+- [x] Deploy functions: `supabase functions deploy` + `supabase secrets set` (11 functions deployed to DEV 14 Nov; risk is NOT deployed)
+- [x] Order creation: reserve tickets → create order → Razorpay order (code on main, tested 13 Nov)
+- [x] Razorpay Test Mode: create order, verify signature (server-side), webhook handler (verified 13 Nov)
+- [x] Ticket issuance after payment (order → tickets → ownership) (code on main)
+- [x] Dynamic QR: rotating nonce, `qr_credentials` rows, expiry (≈30s) (10s window in 006, deployed 14 Nov)
+- [ ] FairQueue: join queue, allocate slots, admission expiry (`queue_entries`) (partial: timer UI only, no server queue)
+- [x] Price-capped resale: listing, cap check, purchase, transfer (`resale_listings`, `transfers`) (code on main, 24 DB tests pass)
+- [x] Group tickets (FR-027): manager, invite/claim token, member assign (`group_tickets`) (code on main)
+- [x] Audit log writes on sensitive actions (`audit_logs`) (009 trigger on main; 14 mutants caught)
+- [x] Rate limiting on auth, queue join, scanner verify (Phase 2.4 on main, deployed to DEV)
 - [ ] API contract doc updated (`docs/API_CONTRACTS.md`)
 
 ---
 
 ## 3. Blockchain — Brajesh
 
-- [~] `contracts/TruTicket.sol` draft (ERC-721, AccessControl, ReentrancyGuard, price cap, pause)
-- [~] `contracts/hardhat.config.js` (Polygon Amoy + hardhat networks)
-- [ ] `npm install` + `npx hardhat compile` passes (fix any errors)
-- [ ] Unit tests: mint, price cap, resale, group allocation, redemption, pause
-- [ ] Deploy to Polygon Amoy (test POL from faucet); deployer key only in local `.env`
-- [ ] Backend mints ticket on purchase; stores `contractAddress` and `tokenId`
-- [ ] On-chain transfer on resale with price cap check
-- [ ] On-chain redemption flag on gate scan
+- [x] `contracts/TruTicket.sol` draft (ERC-721, AccessControl, ReentrancyGuard, price cap, pause) (OpenZeppelin 5.0.2 on main)
+- [x] `contracts/hardhat.config.js` (Polygon Amoy + hardhat networks)
+- [x] `npm install` + `npx hardhat compile` passes (Hardhat 34 tests pass)
+- [x] Unit tests: mint, price cap, resale, group allocation, redemption, pause (34 pass)
+- [x] Deploy to Polygon Amoy (test POL from faucet); deployer key only in local `.env` (deployed: 0x84f30a8755B4b692C388B2613908f8cbe87B0957, 13 Nov)
+- [x] Backend mints ticket on purchase; stores `contractAddress` and `tokenId` (Phase 3 wiring on main)
+- [x] On-chain transfer on resale with price cap check (Phase 3 wiring on main)
+- [x] On-chain redemption flag on gate scan (scanner_verify on main)
 - [ ] Verify contract on PolygonScan (Amoy)
 
 ---
 
-## 4. Mobile App (React Native + Expo) — Ansh & Shivam (Frontend)
+## 4. Mobile App (React Native + Expo)
 
 Base (Phase 2.9, 13 Nov):
 - [x] Expo SDK 57 app, API client in `src/services/` (one module per area: events, tickets, checkout, gate)
 - [x] Supabase Edge Functions with the anon key only (no service key in the app)
 - [x] Tokens in secure storage, refreshed with Supabase rotation
 - [ ] Navigation role switcher (attendee / gate staff): gate is a route from Profile, not a role switch
-- [x] Theme and design tokens
+- [x] Theme and design tokens (dark lime theme merged, commit 50bec8b)
 
 Screens (wired to the DEV backend in Phase 2.9):
 - [x] Splash / onboarding / login (Google native, email code, demo account on DEV)
 - [x] Explore and categories (real events from the `events` function)
 - [x] Event detail (real ticket types and seats left)
-- [~] FairQueue: still a timer (UI only, no server queue yet)
-- [x] Checkout: hold seats, Razorpay order, hosted payment page in the browser
-- [x] Success: waits for the webhook to issue tickets before showing "confirmed"
+- [ ] FairQueue: still a timer (partial: timer UI only, no server queue yet)
+- [ ] Checkout: hold seats, Razorpay order, hosted payment page in the browser (partial: code on main, Netlify page returns 200; phone checkout not tested on device)
+- [ ] Success: waits for the webhook to issue tickets before showing "confirmed" (partial: code on main; phone checkout not tested on device)
 - [x] My tickets (real)
-- [x] Ticket detail with the server QR (refreshes before the 10 s expiry)
-- [~] Resale: still mock (Phase 2.8 mobile wiring, next zip)
-- [~] Group tickets: still mock (Phase 2.8 mobile wiring, next zip)
-- [x] Gate scanner: live camera scan (expo-camera) and paste-QR path (demo), via `scanner_verify`
+- [ ] Ticket detail with the server QR (refreshes before the 10 s expiry) (partial: ticket QR shown on device not tested)
+- [x] Resale: still mock (Phase 2.8 mobile wiring, next zip) (wired in 2.8 on main; buy/sell on device not tested)
+- [x] Group tickets: still mock (Phase 2.8 mobile wiring, next zip) (wired in 2.8 on main; group claim on device not tested)
+- [ ] Gate scanner: live camera scan (expo-camera) and paste-QR path (demo), via `scanner_verify` (partial: organiser device pending, returns CANNOT_TRANSACT; VALID then ALREADY_USED not tested on device)
 - [x] Profile + logout (signs out and clears the saved tokens)
-- [ ] Wallet / ticket history
+- [ ] Wallet / ticket history (not built)
 - [~] Error, empty and offline states (loading and error text on the main screens; gate offline switch logs OFFLINE-UNVERIFIED)
-
----
-
-## 5. Web App (Next.js) — Ansh & Shivam (Frontend)
-
-_Starts after mobile core flows work._
-
-- [~] `apps/web` starter (layout, globals.css, page.tsx, tailwind config) — not yet run
-- [ ] Organizer dashboard: create event, ticket types, sales view
-- [ ] Platform admin: verify organizers, view audit logs
-- [ ] Fraud reviewer: queue of fraud events, review actions
-- [ ] Public event page (SEO)
-- [ ] Responsive pass for mobile browsers
-
----
-
-## 6. ML & Fraud Scoring — Anany
-
-- [~] `services/ml/main.py` FastAPI risk scoring with rule-based fallback
-- [~] `services/ml/requirements.txt`
-- [ ] Synthetic training dataset (bots, velocity, multi-account patterns)
-- [ ] Train model (scikit-learn), save artifact, document features
-- [ ] Model metrics report (precision/recall, threshold)
-- [ ] Serve via FastAPI; Docker image (`infra/Dockerfile.ml`)
-- [ ] Backend calls `/score` on queue join and checkout; writes `fraud_events`
-
-_Note: security review role for Anany to be confirmed (task brief says ML & Security; team constraint says model training only)._
 
 ---
 
 ## 7. Automation — n8n — Brajesh
 
 - [x] Infra compose file drafted (`infra/docker-compose.yml`)
-- [~] Workflow 1: `payment-confirmation.json`
-- [~] Workflow 2: `qr-expiry-warning.json`
-- [ ] Remaining 7 workflows from PRD (9 total) — list in PRD section on n8n
-- [ ] Workflows tested end-to-end with test webhooks
+- [x] Workflow 1: `payment-confirmation.json` (tt-01)
+- [x] Workflow 2: `qr-expiry-warning.json` (tt-04)
+- [x] Remaining 7 workflows from PRD (9 total) — list in PRD section on n8n (8 workflows in n8n/workflows/ Active on PC, 13 Nov)
+- [x] Workflows tested end-to-end with test webhooks (local Docker, 13 Nov)
 
 ---
 
 ## 8. Security & Compliance
 
-- [ ] No secrets in repo (scan with gitleaks before each merge)
-- [ ] Mobile uses anon key only; service_role only in Edge Functions
-- [ ] RLS tested for every table with policies
-- [ ] Razorpay signature verification tested
-- [ ] QR replay protection tested (nonce used once)
-- [ ] Input validation on all Edge Functions
+- [ ] No secrets in repo (scan with gitleaks before each merge) (partial: current tree clean, older git history still contains infra/n8n files)
+- [x] Mobile uses anon key only; service_role only in Edge Functions
+- [ ] RLS tested for every table with policies (partial: 010 tests pass in PGlite; 008, 009, 011 not applied on DEV)
+- [x] Razorpay signature verification tested (13 Nov)
+- [x] QR replay protection tested (nonce used once) (T44-T56 pass)
+- [x] Input validation on all Edge Functions
 
 ---
 
 ## 9. Demo Readiness (PRD Section 20 — 7-minute demo)
 
 - [ ] Demo script rehearsed
-- [ ] Demo data seeded (`002_seed.sql`)
+- [x] Demo data seeded (`002_seed.sql`) (applied on DEV)
 - [ ] Fallback plan for network/testnet failures (PRD Section 21)
 - [ ] Backup video recorded
 
@@ -183,7 +155,7 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 
 ## Next 3 PRs (suggested order)
 
-1. `feature/mobile-setup` — Ansh/Shivam: expo app runs, Supabase anon client, navigation
+1. `feature/mobile-setup`: expo app runs, Supabase anon client, navigation
 2. `feature/contracts-compile` — Brajesh: hardhat compile + tests passing
 3. `feature/db-seed-functions` — Brajesh: 002 seed + 003 reservation function
 
@@ -208,26 +180,7 @@ _Note: security review role for Anany to be confirmed (task brief says ML & Secu
 
 **Checks run:** `tsc --noEmit` pass. Android `expo export` pass. Logic tests (resale cap maths, group rules, gate states, QR window and skew) all pass.
 
-**Not built yet:** camera scanning (needs expo-camera and a new EAS dev build), web portals (organiser and admin, 18 screens), Phase 2 backend.
-
----
-
-## v3 Status — Phase 1 web batch (organiser and admin portals, mock data)
-
-**Built (web, Next.js 15.5.29, React 19.2.3):** all 18 screens from PLAN §4.
-- Organiser (10): Overview, Create event (5-step wizard), Event detail (tabs), Ticket inventory, Resale policy (cap calculator), Fraud monitoring, Gate staff (authorise device), Payouts & settlements, Organisation details (new), Verification status (new).
-- Admin (8): Platform overview, User management, Event moderation, Emergency protocol, Audit logs, Risk events queue, Session investigation, Appeal review.
-- Shared: sidebar, top bar, brand logo (`public/brand/`), design tokens from `packages/ui-tokens/tokens.json` as CSS variables.
-
-**Changed or deviated:**
-- Styling uses plain CSS variables in `src/app/globals.css`, not Tailwind. The starter `tailwind.config.ts` is removed. Reason: keeps one token source shared with mobile.
-- Money is shown in ₹ (Indian grouping). Reference screenshots show $.
-- All data is mock (`src/lib/organiser-data.ts`, `src/lib/admin-data.ts`). Forms validate locally and do not save yet.
-- Risk scores are mock values. The ML service is excluded from this build.
-
-**Checks run:** `tsc --noEmit` pass. `next build` pass (21 routes). Dev server on 0.0.0.0:3000: all 21 routes return 200 (unknown event id returns 404).
-
-**Not built yet:** Supabase auth and RLS, real API calls, Razorpay, role guards on `/organiser` and `/admin`, visual review against the admin reference screenshots, and the Phase 2 backend.
+**Not built yet:** camera scanning (needs expo-camera and a new EAS dev build), Phase 2 backend.
 
 ---
 
@@ -569,7 +522,7 @@ Done in this zip:
 - [x] `scripts/set-mobile-env-dev.ps1`: stores the DEV URL, anon key, and gate event id in EAS (prompts for the key; refuses production)
 
 Not in this zip (on purpose):
-- [ ] Resale and group screens are still mock (Phase 2.8 mobile wiring, next zip)
+- [x] Resale and group screens are still mock (Phase 2.8 mobile wiring, next zip) (wired in 2.8/3; device test not run)
 - [ ] FairQueue is still a timer (no server queue)
 - [ ] Device registration screens (`devices` function) are UI only; Android Keystore attestation is skipped (demo device path, Phase 2b)
 - [ ] Expo lint: the repo has no ESLint config for `apps/mobile`; `expo lint` asks to install one. Not added in this zip. Typecheck and bundle are the checks used.
@@ -617,10 +570,10 @@ Dev test (user, after deploy): demo attendee sign-in with the DEV demo code → 
 - Chain smoke on a local Hardhat node, using the same helpers as the Edge Function: 12 of 12 checks pass (policy, mint owner, list above cap refused, list at cap, settle owner, transfer count, allocate, redeem, double redeem refused, list after redeem refused).
 
 **Not yet done (needs the user):**
-- Amoy deploy (needs the test wallet and test MATIC from the faucet). Run `scripts/deploy-amoy.ps1`.
-- PolygonScan verification (optional).
-- `scripts/set-chain-secrets-dev.ps1` and `deploy-functions.ps1` on DEV.
-- Mint on purchase, resale and group transfers: now done by the functions themselves (best effort, see the Phase 3 and 2.8 wiring section). n8n is not used for mint.
+- [x] Amoy deploy (deployed: 0x84f30a8755B4b692C388B2613908f8cbe87B0957, 13 Nov)
+- [ ] PolygonScan verification (optional)
+- [x] `scripts/set-chain-secrets-dev.ps1` and `deploy-functions.ps1` on DEV (11 functions deployed 14 Nov; risk is NOT deployed).
+- [x] Mint on purchase, resale and group transfers: now done by the functions themselves (best effort, see the Phase 3 and 2.8 wiring section). n8n is not used for mint.
 
 **Known gaps (Phase 3):**
 - Reconciliation: if a chain call fails after a DB change (e.g. redeem after a VALID scan), the chain and DB can disagree. n8n needs a retry job for tickets with `tokenId` set and no on-chain redeem.
