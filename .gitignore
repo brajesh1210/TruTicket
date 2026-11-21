@@ -60,7 +60,8 @@ coverage/
 .turbo/
 apps/web/next-env.d.ts
 apps/web/tsconfig.tsbuildinfo
-/supabase
+supabase/.temp/
+supabase/.branches/
 
 # Databases & n8n runtime state
 *.sqlite

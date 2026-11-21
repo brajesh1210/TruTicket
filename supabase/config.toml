@@ -1,0 +1,50 @@
+# Supabase CLI project config (used by scripts/deploy-auth.ps1).
+# Sign-in endpoints must be callable before a user is logged in, so JWT
+# verification is off for "auth". The function itself checks every request.
+project_id = "truticket"
+
+[functions.auth]
+enabled = true
+verify_jwt = false
+
+[functions.devices]
+enabled = true
+verify_jwt = false
+
+[functions.events]
+enabled = true
+verify_jwt = false
+
+[functions.orders]
+enabled = true
+verify_jwt = false
+
+[functions.checkout]
+enabled = true
+# Opened by the phone's browser for one Razorpay order. It has no sign-in.
+verify_jwt = false
+
+[functions.razorpay_webhook]
+enabled = true
+verify_jwt = false
+
+[functions.tickets]
+enabled = true
+verify_jwt = false
+
+[functions.scanner_verify]
+enabled = true
+verify_jwt = false
+
+[functions.resale]
+enabled = true
+verify_jwt = false
+
+[functions.groups]
+enabled = true
+verify_jwt = false
+
+[functions.chain]
+enabled = true
+# Internal only: needs the x-internal-secret header, not a user JWT.
+verify_jwt = false
