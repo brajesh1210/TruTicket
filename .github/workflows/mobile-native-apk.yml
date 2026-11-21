@@ -88,16 +88,44 @@ jobs:
           APK_URL: ${{ steps.eas_build.outputs.apk_url }}
         run: |
           echo "Downloading APK from: $APK_URL"
-          curl -L -fail -o "TruTicket-${SHORT_SHA}.apk" "$APK_URL"
+          curl -sSL --fail-with-body --retry 3 -o "TruTicket-${SHORT_SHA}.apk" "$APK_URL"
 
-          if [ ! -s "TruTicket-${SHORT_SHA}.apk" ]; then
-            echo "::error::Downloaded APK is missing or empty."
+          APK_FILE="TruTicket-${SHORT_SHA}.apk"
+
+          if [ ! -f "$APK_FILE" ]; then
+            echo "::error::Downloaded file $APK_FILE does not exist."
+            exit 1
+          fi
+
+          # a. Check first 2 bytes are "PK"
+          MAGIC=$(python3 -c "import sys; f=open(sys.argv[1], 'rb'); sys.stdout.write(f.read(2).decode('latin1', 'replace'))" "$APK_FILE")
+          if [ "$MAGIC" != "PK" ]; then
+            echo "::error::APK magic byte check failed: expected 'PK', got '$MAGIC'."
+            exit 1
+          fi
+
+          # b. Check valid zip archive integrity
+          if ! python3 -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); sys.exit(1 if z.testzip() else 0)" "$APK_FILE"; then
+            echo "::error::APK zipfile integrity check failed: file is not a valid zip archive."
+            exit 1
+          fi
+
+          # c. Check file contains AndroidManifest.xml
+          if ! python3 -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); sys.exit(0 if 'AndroidManifest.xml' in z.namelist() else 1)" "$APK_FILE"; then
+            echo "::error::APK manifest check failed: AndroidManifest.xml is missing from the package."
+            exit 1
+          fi
+
+          # d. Check size is at least 50 MB (50 * 1024 * 1024 = 52428800 bytes)
+          SIZE=$(wc -c < "$APK_FILE" | tr -d ' ')
+          if [ "$SIZE" -lt 52428800 ]; then
+            echo "::error::APK size check failed: size ($SIZE bytes) is below minimum threshold of 50 MB (52428800 bytes)."
             exit 1
           fi
 
           # Keep TruTicket.apk as standard named copy
-          cp "TruTicket-${SHORT_SHA}.apk" TruTicket.apk
-          echo "APK downloaded successfully ($(du -h TruTicket.apk | cut -f1))"
+          cp "$APK_FILE" TruTicket.apk
+          echo "APK downloaded and verified successfully: $(du -h TruTicket.apk | cut -f1) ($SIZE bytes)"
 
       - name: Create fresh GitHub Release
         env:
@@ -110,6 +138,31 @@ jobs:
           BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
           REPO: ${{ github.repository }}
         run: |
+          # Re-verify files before release upload
+          for RELEASE_FILE in TruTicket.apk "TruTicket-${SHORT_SHA}.apk"; do
+            if [ ! -f "$RELEASE_FILE" ]; then
+              echo "::error::Release file $RELEASE_FILE not found."
+              exit 1
+            fi
+            if [ "$(python3 -c "import sys; f=open(sys.argv[1], 'rb'); sys.stdout.write(f.read(2).decode('latin1', 'replace'))" "$RELEASE_FILE")" != "PK" ]; then
+              echo "::error::Release file $RELEASE_FILE failed magic byte verification."
+              exit 1
+            fi
+            if ! python3 -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); sys.exit(1 if z.testzip() else 0)" "$RELEASE_FILE"; then
+              echo "::error::Release file $RELEASE_FILE failed zip integrity verification."
+              exit 1
+            fi
+            if ! python3 -c "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); sys.exit(0 if 'AndroidManifest.xml' in z.namelist() else 1)" "$RELEASE_FILE"; then
+              echo "::error::Release file $RELEASE_FILE is missing AndroidManifest.xml."
+              exit 1
+            fi
+            FILE_SIZE=$(wc -c < "$RELEASE_FILE" | tr -d ' ')
+            if [ "$FILE_SIZE" -lt 52428800 ]; then
+              echo "::error::Release file $RELEASE_FILE size ($FILE_SIZE bytes) is less than 50 MB."
+              exit 1
+            fi
+          done
+
           BUILD_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           cat <<EOF > release_notes.md
