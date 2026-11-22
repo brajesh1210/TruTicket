@@ -1,7 +1,7 @@
 /**
  * Gate scanning (PHASE2_PLAN §2.7). The server does the real checks: QR signature, nonce,
  * event match, and an atomic redeem. The app only shows the answer.
- * Source: the `scanner_verify` Edge Function. Needs an organiser sign-in.
+ * Source: the `scanner_verify` Edge Function. Requires gate_staff sign-in.
  */
 import { callFunction } from "./api";
 import { ApiError } from "./errors";

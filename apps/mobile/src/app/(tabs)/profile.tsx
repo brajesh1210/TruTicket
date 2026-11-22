@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Screen } from "../../components/Screen";
-import { canTransact, signOut, useAuth } from "../../auth/session";
+import { canTransact, isGateStaff, signOut, useAuth } from "../../auth/session";
 import { getDeviceKeyId } from "../../auth/device";
 import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 
@@ -10,6 +10,7 @@ import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 export default function Profile() {
   const { session } = useAuth();
   const verified = canTransact(session);
+  const gateStaff = isGateStaff(session);
   const email = session?.email ?? "";
   const name = email ? email.split("@")[0] : "Guest";
   const initial = name.charAt(0).toUpperCase();
@@ -53,25 +54,19 @@ export default function Profile() {
             </Text>
           </View>
 
-          <Text style={styles.label}>Active prototype role</Text>
+          <Text style={styles.label}>Account role</Text>
           <View style={styles.roles}>
-            <Text style={[styles.role, styles.roleOn]}>Attendee</Text>
-            <Pressable onPress={() => router.push("/group")} accessibilityRole="button">
-              <Text style={styles.role}>Group manager</Text>
-            </Pressable>
-            <Pressable onPress={() => router.push("/gate")} accessibilityRole="button">
-              <Text style={styles.role}>Gate staff</Text>
-            </Pressable>
+            <Text style={[styles.role, styles.roleOn]}>{gateStaff ? "Gate staff" : "Attendee"}</Text>
           </View>
         </View>
 
         <Text style={styles.section}>Security & alerts</Text>
         <View style={styles.list}>
           <Row label="Security & devices" sub="Sessions and phone link" onPress={() => router.push("/security")} />
-          <Row label="Resale marketplace" sub="Buy and sell passes" onPress={() => router.push("/resale")} />
-          <Row label="Group distribution" sub="Share tickets with your group" onPress={() => router.push("/group")} />
-          <Row label="Accept a group ticket" sub="Claim an invite" onPress={() => router.push("/group/claim")} />
-          <Row label="Gate staff" sub="Scan tickets at the gate" onPress={() => router.push("/gate")} last />
+          <Row label="Resale marketplace" sub="Buy and sell passes" onPress={() => router.push("/resale")} last={!gateStaff} />
+          {gateStaff ? (
+            <Row label="Gate staff" sub="Scan tickets at the gate" onPress={() => router.push("/gate")} last />
+          ) : null}
         </View>
 
         <Pressable onPress={onLogout} style={styles.logout} accessibilityRole="button" testID="logout">

@@ -1,6 +1,6 @@
 /**
- * Resale and group helpers (Phase 2.8). Pure: no network and no native modules, so the
- * tests can run these on their own. The network calls live in services/resale.ts and services/groups.ts.
+ * Resale helpers (Phase 2.8). Pure: no network and no native modules, so the
+ * tests can run these on their own. The network calls live in services/resale.ts.
  */
 
 /** Platform default cap: 110% of face value (PRD 6.5). Each event can set its own; the server is the authority. */
@@ -25,32 +25,6 @@ export type AppListing = {
   startsAt: string;
   status: string; // ACTIVE | PURCHASE_PENDING for my listings; ACTIVE for the marketplace
 };
-
-export type RawInvite = {
-  id: string;
-  status: string;
-  inviteExpiresAt: string | null;
-  ticketId: string;
-  inviteeEmailKey: string;
-};
-
-export type AppInvite = {
-  id: string;
-  ticketId: string;
-  status: string; // INVITED | CLAIMED | REVOKED
-  expiresAt: string | null;
-};
-
-/** The subset of AppTicket that the group helpers need. */
-export type BucketCandidate = {
-  id: string;
-  eventId: string;
-  eventTitle: string;
-  tierName: string;
-  statusRaw: string;
-};
-
-export const BUCKET_STATUS = "ISSUED_UNASSIGNED_GROUP";
 
 /** Whole rupees to paise (integer). Rounds to the nearest paisa so 48.5 becomes 4850. */
 export function rupeesToPaise(rupees: number): number {
@@ -86,51 +60,7 @@ export function toAppListing(raw: RawListing): AppListing {
   };
 }
 
-export function toAppInvite(raw: RawInvite): AppInvite {
-  return { id: raw.id, ticketId: raw.ticketId, status: raw.status, expiresAt: raw.inviteExpiresAt };
-}
-
-const INVITE_LABELS: Record<string, string> = {
-  INVITED: "Waiting for the member to claim",
-  CLAIMED: "Claimed",
-  REVOKED: "Cancelled",
-};
-
-export function inviteLabel(status: string): string {
-  return INVITE_LABELS[status] ?? status;
-}
-
 export function listingLabel(status: string): string {
   if (status === "PURCHASE_PENDING") return "Someone is paying for this";
   return "Listed";
-}
-
-/**
- * Group bucket tickets (not yet given to a member), grouped by event and tier.
- * The first ticket id of each group is what the manager screen opens with.
- */
-export type BucketGroup = {
-  key: string;
-  eventId: string;
-  eventTitle: string;
-  tierName: string;
-  ticketIds: string[];
-};
-
-export function bucketGroups(tickets: BucketCandidate[]): BucketGroup[] {
-  const map = new Map<string, BucketGroup>();
-  for (const t of tickets) {
-    if (t.statusRaw !== BUCKET_STATUS) continue;
-    const key = `${t.eventId}|${t.tierName}`;
-    const g = map.get(key) ?? { key, eventId: t.eventId, eventTitle: t.eventTitle, tierName: t.tierName, ticketIds: [] };
-    g.ticketIds.push(t.id);
-    map.set(key, g);
-  }
-  return [...map.values()];
-}
-
-/** Unassigned bucket tickets for the same event and tier as `anchor`, in the order they were listed. */
-export function bucketFor(tickets: BucketCandidate[], anchor: BucketCandidate | undefined): BucketCandidate[] {
-  if (!anchor) return [];
-  return tickets.filter((t) => t.statusRaw === BUCKET_STATUS && t.eventId === anchor.eventId && t.tierName === anchor.tierName);
 }
