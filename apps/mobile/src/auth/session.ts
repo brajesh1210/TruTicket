@@ -14,6 +14,8 @@ import {
   DEMO_EMAIL,
   DEMO_MODE,
   GOOGLE_WEB_CLIENT_ID,
+  SUPABASE_ANON_KEY,
+  SUPABASE_URL,
 } from "../services/config";
 import { ApiError, messageOf } from "../services/errors";
 import {
@@ -35,6 +37,7 @@ export type Session = {
   emailVerified: boolean;
   /** Google account subject (stable Google user id). */
   googleSub?: string;
+  role?: string;
 };
 
 type State = {
@@ -83,7 +86,25 @@ function toSession(s: StoredSession): Session {
     provider: s.provider,
     emailVerified: true,
     googleSub: s.googleSub,
+    role: s.role,
   };
+}
+
+async function fetchProfileRole(userId: string, accessToken: string): Promise<string | undefined> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return undefined;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=role`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (!res.ok) return undefined;
+    const rows = (await res.json().catch(() => null)) as Array<{ role?: string }> | null;
+    return rows?.[0]?.role;
+  } catch {
+    return undefined;
+  }
 }
 
 type SignInBody = {
@@ -108,6 +129,13 @@ async function startSession(body: SignInBody, email: string, provider: "google" 
   // Link this phone to the new session. A failure here must not block sign-in: checkout
   // retries the link and shows the server's message if it still fails.
   void ensureDeviceLinked(body.user_id).catch(() => undefined);
+  void fetchProfileRole(body.user_id, body.session.access_token).then(async (role) => {
+    if (role && state.session?.userId === body.user_id) {
+      stored.role = role;
+      await saveSession(stored);
+      setState({ session: { ...state.session, role } });
+    }
+  });
 }
 
 export type AuthResult = { ok: true } | { ok: false; error: string };
@@ -116,6 +144,15 @@ export type AuthResult = { ok: true } | { ok: false; error: string };
 async function hydrate() {
   const stored = await loadStoredSession();
   setState({ session: stored ? toSession(stored) : null, ready: true });
+  if (stored) {
+    void fetchProfileRole(stored.userId, stored.accessToken).then(async (role) => {
+      if (role && state.session?.userId === stored.userId && state.session.role !== role) {
+        stored.role = role;
+        await saveSession(stored);
+        setState({ session: { ...state.session, role } });
+      }
+    });
+  }
 }
 void hydrate();
 
@@ -228,4 +265,13 @@ export async function signOut(): Promise<void> {
 /** Used by screens that need a verified email before a transaction. */
 export function canTransact(session: Session | null): boolean {
   return !!session && session.emailVerified;
+}
+
+/**
+ * Gate scanner access gate: only accounts with role gate_staff may view and use the ticket scanner.
+ */
+export function isGateStaff(session: Session | null): boolean {
+  if (!session) return false;
+  const role = (session.role ?? "").toLowerCase();
+  return role === "gate_staff";
 }

@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { StyleSheet, Text } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Button } from "../../components/Button";
 import { Field } from "../../components/Field";
 import { Screen } from "../../components/Screen";
+import { isGateStaff, useAuth } from "../../auth/session";
 import { GATE_EVENT_ID } from "../../services/config";
 import { messageOf } from "../../services/errors";
 import { scanToken } from "../../services/gate";
@@ -15,9 +16,36 @@ import { colors, fontSize, fontWeight, space } from "../../theme";
  * The server checks the text exactly like a camera scan.
  */
 export default function Manual() {
+  const { session } = useAuth();
+  const allowed = isGateStaff(session);
+
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  if (!allowed) {
+    return (
+      <Screen edges={["top", "bottom"]}>
+        <View style={styles.restrictedWrap}>
+          <Text style={styles.heading}>Gate staff only</Text>
+          <Text style={styles.body}>This function is restricted to authorized gate staff.</Text>
+          <Button label="Back to Home" onPress={() => router.replace("/(tabs)")} />
+        </View>
+      </Screen>
+    );
+  }
+
+  if (!GATE_EVENT_ID) {
+    return (
+      <Screen edges={["top", "bottom"]}>
+        <View style={styles.restrictedWrap}>
+          <Text style={styles.heading}>Gate event set nahi hai</Text>
+          <Text style={styles.body}>The gate event is not set. Add EXPO_PUBLIC_GATE_EVENT_ID to the build settings.</Text>
+          <Button label="Back" onPress={() => router.back()} />
+        </View>
+      </Screen>
+    );
+  }
 
   async function check() {
     const clean = text.trim();
@@ -67,6 +95,7 @@ export default function Manual() {
 }
 
 const styles = StyleSheet.create({
+  restrictedWrap: { flex: 1, justifyContent: "center", alignItems: "center", gap: space.md },
   back: { color: colors.brand.cyan, fontSize: fontSize.md, paddingVertical: space.md },
   heading: { color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.bold },
   body: { color: colors.text.muted, fontSize: fontSize.md, lineHeight: 22, marginTop: space.xs, marginBottom: space.lg },

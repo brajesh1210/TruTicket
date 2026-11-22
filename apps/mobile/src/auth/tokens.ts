@@ -18,6 +18,7 @@ export type StoredSession = {
   email: string;
   provider: "google" | "email";
   googleSub?: string;
+  role?: string;
 };
 
 let current: StoredSession | null = null;

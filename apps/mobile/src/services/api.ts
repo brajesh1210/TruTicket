@@ -14,8 +14,7 @@ export type FunctionName =
   | "orders"
   | "tickets"
   | "scanner_verify"
-  | "resale"
-  | "groups";
+  | "resale";
 
 export async function callFunction<T>(
   name: FunctionName,

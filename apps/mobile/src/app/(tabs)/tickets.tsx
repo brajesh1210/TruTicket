@@ -34,9 +34,6 @@ export default function Tickets() {
     <Screen edges={["top"]}>
       <View style={styles.header}>
         <Text style={styles.title}>My Tickets</Text>
-        <Pressable onPress={() => router.push("/group")} style={styles.groupPill} accessibilityRole="button">
-          <Text style={styles.groupText}>👥 Group</Text>
-        </Pressable>
       </View>
 
       <View style={styles.tabs}>
@@ -120,15 +117,6 @@ const styles = StyleSheet.create({
     marginTop: space.md,
   },
   title: { color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.bold },
-  groupPill: {
-    borderWidth: 1,
-    borderColor: colors.bg.border,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    backgroundColor: colors.bg.card,
-  },
-  groupText: { color: colors.brand.ctaCyan, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   tabs: { flexDirection: "row", gap: space.sm, marginTop: space.md, flexWrap: "wrap" },
   tab: {
     paddingHorizontal: space.md,

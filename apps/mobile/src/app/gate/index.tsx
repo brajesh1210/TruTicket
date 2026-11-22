@@ -4,6 +4,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { router, useFocusEffect } from "expo-router";
 import { Button } from "../../components/Button";
 import { Screen } from "../../components/Screen";
+import { isGateStaff, useAuth } from "../../auth/session";
 import { GATE_EVENT_ID } from "../../services/config";
 import { useEvent } from "../../services/events";
 import { messageOf } from "../../services/errors";
@@ -13,10 +14,12 @@ import { colors, fontSize, fontWeight, radius, space } from "../../theme";
 /**
  * Gate scanner (PRD screen 23). Live camera scan of the attendee's QR. Each scan is checked by
  * the server (`scanner_verify`), which marks the ticket used on the first valid scan.
- * Gate staff only: the signed-in account must be the organiser of this event.
+ * Gate staff only: only logged-in users with role `gate_staff`.
  */
 export default function GateScanner() {
-  const { data: event } = useEvent(GATE_EVENT_ID || undefined);
+  const { session } = useAuth();
+  const allowed = isGateStaff(session);
+
   const [permission, requestPermission] = useCameraPermissions();
   const [offline, setOffline] = useState(false);
   const [last, setLast] = useState<string | null>(null);
@@ -25,9 +28,12 @@ export default function GateScanner() {
   const lock = useRef(false);
   const sweep = useRef(new Animated.Value(0)).current;
 
+  const { data: event } = useEvent(allowed && GATE_EVENT_ID ? GATE_EVENT_ID : undefined);
+
   // Only one camera preview may run at a time. The camera stops when this screen loses focus.
   useFocusEffect(
     useCallback(() => {
+      if (!allowed || !GATE_EVENT_ID) return;
       setFocused(true);
       lock.current = false;
       setChecking(false);
@@ -42,7 +48,7 @@ export default function GateScanner() {
         setFocused(false);
         loop.stop();
       };
-    }, [sweep]),
+    }, [allowed, sweep]),
   );
 
   async function onScanned(data: string) {
@@ -60,16 +66,37 @@ export default function GateScanner() {
       const r = await scanToken(GATE_EVENT_ID, data);
       router.push({ pathname: "/gate/result", params: { status: r.status, detail: r.detail } });
     } catch (e) {
-      // Server refused the check (not the organiser, scanner off, network). Show the reason.
+      // Server refused the check (not authorized, scanner off, network). Show the reason.
       const detail = messageOf(e, "Could not check this code. Try again.");
       router.push({ pathname: "/gate/result", params: { status: "INVALID", detail } });
     }
   }
 
+  if (!allowed) {
+    return (
+      <Screen edges={["top", "bottom"]}>
+        <View style={styles.restrictedWrap}>
+          <Text style={styles.restrictedIcon}>🔒</Text>
+          <Text style={styles.restrictedTitle}>Gate staff only</Text>
+          <Text style={styles.restrictedBody}>
+            This ticket scanner is restricted to authorized gate staff.
+          </Text>
+          <Button label="Back to Home" onPress={() => router.replace("/(tabs)")} />
+        </View>
+      </Screen>
+    );
+  }
+
   if (!GATE_EVENT_ID) {
     return (
-      <Screen>
-        <Text style={styles.note}>The gate event is not set. Add EXPO_PUBLIC_GATE_EVENT_ID to the build settings.</Text>
+      <Screen edges={["top", "bottom"]}>
+        <View style={styles.restrictedWrap}>
+          <Text style={styles.restrictedTitle}>Gate event set nahi hai</Text>
+          <Text style={styles.restrictedBody}>
+            The gate event is not set. Add EXPO_PUBLIC_GATE_EVENT_ID to the build settings.
+          </Text>
+          <Button label="Exit gate mode" variant="ghost" onPress={() => router.replace("/(tabs)")} />
+        </View>
       </Screen>
     );
   }
@@ -132,7 +159,13 @@ export default function GateScanner() {
       </Text>
       <View style={{ flex: 1 }} />
       <View style={styles.footer}>
-        <Button label="Paste QR code" variant="secondary" onPress={() => router.push("/gate/manual")} style={{ flex: 1 }} testID="paste-qr" />
+        <Button
+          label="Paste QR code"
+          variant="secondary"
+          onPress={() => router.push("/gate/manual")}
+          style={{ flex: 1 }}
+          testID="paste-qr"
+        />
         <Button label="Activity log" variant="secondary" onPress={() => router.push("/gate/activity")} style={{ flex: 1 }} />
       </View>
       <Button label="Exit gate mode" variant="ghost" onPress={() => router.replace("/(tabs)")} />
@@ -143,6 +176,10 @@ export default function GateScanner() {
 const CORNER = 36;
 
 const styles = StyleSheet.create({
+  restrictedWrap: { flex: 1, justifyContent: "center", alignItems: "center", gap: space.md, paddingHorizontal: space.lg },
+  restrictedIcon: { fontSize: 56, textAlign: "center" },
+  restrictedTitle: { color: colors.text.primary, fontSize: fontSize.xxl, fontWeight: fontWeight.bold, textAlign: "center" },
+  restrictedBody: { color: colors.text.muted, fontSize: fontSize.md, textAlign: "center", lineHeight: 22, marginBottom: space.sm },
   topBar: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: space.md },
   eventTitle: { color: colors.text.primary, fontSize: fontSize.lg, fontWeight: fontWeight.bold },
   venue: { color: colors.text.muted, fontSize: fontSize.xs, marginTop: space.xxs },
